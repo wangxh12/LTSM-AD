@@ -5,6 +5,12 @@
 *.so
 *.log
 
+# datasets
+datasets
+
+# pretrained models
+PretrainedModels
+
 # Python
 *.pyc
 *.egg/
@@ -58,3 +64,6 @@ env/
 # Cache
 **/.mypy_cache
 **/.pytest_cache
+
+# Experiment outputs
+outputs/

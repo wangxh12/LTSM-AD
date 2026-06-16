@@ -1,0 +1,58 @@
+seed: 42
+model_id: timebert-base
+
+data:
+  # data path
+  root_path: datasets/pretrain/minnesota/raw_split
+  pattern: ThorFlight*.csv
+
+  # fields
+  target_fields:
+    - navalt
+    - alt
+    - h
+    - navvn
+    - navve
+    - navvd
+    - vn
+    - ve
+    - vd
+    - p
+    - q
+    - r
+  label_col: label
+  timestamp_col: time
+
+  seq_len: 32
+  stride: 1
+  train_val_split: 0.9
+  batch_size: 256
+  num_workers: 4
+
+model:
+  d_model: 128
+  n_heads: 4
+  num_layers: 2
+  d_ffn: 256
+  dropout: 0.1
+
+optimization:
+  lr: 0.0001
+  weight_decay: 0.0001
+
+trainer:
+  max_epochs: 50
+  early_stopping_patience: 7
+  accelerator: auto
+  devices: 1
+  precision: 32-true
+  log_every_n_steps: 20
+  deterministic: false
+  mask_ratio: 0.25
+
+outputs:
+  root_dir: outputs/uav_ad
+
+export:
+  save_dir: pretrained/timebert-base
+  export_best: true
