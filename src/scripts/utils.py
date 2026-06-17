@@ -65,42 +65,6 @@ def model_version(config: dict[str, Any]) -> str:
     return str(config.get("model_version", "default")).lower()
 
 
-def trainer_and_checkpoint(
-    run_dir: Path,
-    trainer_cfg: dict[str, Any],
-    monitor: str = "val_loss",
-) -> tuple[Trainer, ModelCheckpoint]:
-    checkpoint = ModelCheckpoint(
-        dirpath=run_dir / "checkpoints",
-        filename="{epoch:03d}-{val_loss:.6f}",
-        monitor=monitor,
-        mode="min",
-        save_top_k=1,
-        save_last=True,
-    )
-    callbacks = [
-        EarlyStopping(
-            monitor=monitor,
-            mode="min",
-            patience=int(trainer_cfg.get("early_stopping_patience", 8)),
-        ),
-        checkpoint,
-    ]
-    logger = CSVLogger(save_dir=str(run_dir / "logs"), name="lightning")
-    trainer = Trainer(
-        max_epochs=int(trainer_cfg.get("max_epochs", 50)),
-        accelerator=trainer_cfg.get("accelerator", "auto"),
-        devices=trainer_cfg.get("devices", 1),
-        precision=trainer_cfg.get("precision", "32-true"),
-        callbacks=callbacks,
-        logger=logger,
-        log_every_n_steps=int(trainer_cfg.get("log_every_n_steps", 20)),
-        deterministic=bool(trainer_cfg.get("deterministic", False)),
-        enable_checkpointing=True,
-    )
-    return trainer, checkpoint
-
-
 def load_lightning_weights(module: torch.nn.Module, checkpoint_path: str | Path) -> None:
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
     state_dict = checkpoint.get("state_dict", checkpoint)

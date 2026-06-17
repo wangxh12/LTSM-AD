@@ -6,7 +6,7 @@ from pathlib import Path
 import lightning as L
 import numpy as np
 import pandas as pd
-from src.scripts.utils import make_run_dir, model_version, save_json
+from src.scripts.utils import model_version, save_json
 from src.visualization import plot_reconstruction, plot_scores
 from src.evaluation import (
     best_f1_threshold,
@@ -28,7 +28,12 @@ def _make_loader(dataset, batch_size: int, num_workers: int) -> DataLoader:
     )
 
 
-def evaluate_model(model: L.LightningModule, data, config):
+def evaluate_model(
+    model: L.LightningModule,
+    data,
+    config,
+    output_dir: str | Path
+):
     device = model.device
     model.to(device)
     model.eval()
@@ -39,9 +44,9 @@ def evaluate_model(model: L.LightningModule, data, config):
     threshold_percentile = float(config["evaluation"].get("threshold_percentile", 95))
     threshold = float(np.percentile(train_scores, threshold_percentile))
     
-    dcfg= config.get("data", {})
-    run_dir = Path(config["runtime"]["run_dir"])
-    checkpoint_path = config["runtime"].get("checkpoint_path")
+    dcfg = config.get("data", {})
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     metrics_rows: list[dict[str, object]] = []
     test_batch_size = int(dcfg.get("batch_size", 256))
@@ -70,11 +75,10 @@ def evaluate_model(model: L.LightningModule, data, config):
             "auprc": compute_auprc(labels, scores),
             "anomaly_points": int((labels == 1).sum()),
             "normal_points": int((labels == 0).sum()),
-            "checkpoint": str(checkpoint_path),
         }
         metrics_rows.append(row)
 
-        dataset_dir = run_dir / "test" / dataset_name
+        dataset_dir = output_dir / "test" / dataset_name
         dataset_dir.mkdir(parents=True, exist_ok=True)
         save_json(row, dataset_dir / "metrics.json")
         pd.DataFrame({"time": series.time if series.time is not None else np.arange(len(scores)), "score": scores, "label": labels}).to_csv(
@@ -100,8 +104,9 @@ def evaluate_model(model: L.LightningModule, data, config):
             time=series.time,
         )
 
+    # save overall metrics
     metrics_frame = pd.DataFrame(metrics_rows)
-    metrics_frame.to_csv(run_dir / "metrics.csv", index=False)
+    metrics_frame.to_csv(output_dir / "metrics.csv", index=False)
     return SimpleNamespace(
         metrics=metrics_rows,
         threshold=threshold,

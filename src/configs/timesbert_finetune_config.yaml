@@ -1,0 +1,71 @@
+seed: 42
+pretrained_model: PretrainedModels/timebert-base
+
+data:
+  dataset_name: minnesota
+  # data path
+  train_path: datasets/finetune/minnesota/train_flight104.csv
+  test_paths:
+    # - datasets/finetune/minnesota/ThorFlight111.csv
+    # - datasets/finetune/minnesota/ThorFlight112.csv
+    - datasets/finetune/minnesota/ThorFlight121.csv
+
+  # fields
+  target_fields:
+    - navalt
+    - alt
+    - h
+    - navvn
+    - navve
+    - navvd
+    - vn
+    - ve
+    - vd
+    - p
+    - q
+    - r
+  label_col: label
+  timestamp_col: time
+
+  seq_len: 40
+  stride: 1
+  train_val_split: 0.9
+  batch_size: 256
+  num_workers: 4
+
+model:
+  d_model: 128
+  n_heads: 4
+  num_layers: 2
+  d_ffn: 256
+  patch_len: 4
+  dropout: 0.1
+  activation: gelu
+
+optimization:
+  lr: 0.0001
+  weight_decay: 0.0001
+
+trainer:
+  max_epochs: 1
+  early_stopping_patience: 3
+  accelerator: auto
+  devices: 1
+  precision: 32-true
+  log_every_n_steps: 20
+  deterministic: false
+  # mask_ratio: 0.25
+
+evaluation:
+  threshold_percentile: 95
+
+checkpoint:
+  root_dir: checkpoints
+  filename: "{epoch}-{step}-{val_loss:.4f}"
+  monitor: val_loss
+  mode: min
+  save_top_k: 1
+  save_last: true
+
+results:
+  root_dir: results_dir

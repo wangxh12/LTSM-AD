@@ -1,13 +1,12 @@
 import argparse
 import os
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any, Dict, Tuple
 
-import numpy as np
 import torch
 import yaml
 import lightning as L
-from datasets import load_dataset
 from lightning.pytorch import Trainer, seed_everything
 from lightning.pytorch.callbacks import Callback, ModelCheckpoint, TQDMProgressBar
 from lightning.pytorch.loggers import TensorBoardLogger
@@ -15,74 +14,27 @@ from lightning.pytorch.loggers import TensorBoardLogger
 from src.data.csv_windows import FinetuneDataModule
 from src.scripts.utils import save_json
 
-from src.model_v1 import ReconstructionLightningModule as V1ReconstructionLitModule
-from src.model_timesbert import TimesBERTLitModule
-from src.model import ReconstructionLitModule
-from src.scripts.utils import load_lightning_weights, model_config, model_version
+from src.model_timesbert.lightning import ModelForFinetuning
+from src.model_timesbert.timesbert import Model
 
 def load_config(config_path: str) -> Dict[str, Any]:
     with open(config_path, "r") as f:
         return yaml.safe_load(f) or {}
 
-def _build_module(config: Dict[str, Any]) -> L.LightningModule:
-    version = model_version(config)
-    opt_cfg = config.get("optimization", {})
 
-    lr = float(opt_cfg.get("lr", 5e-4))
-    weight_decay = float(opt_cfg.get("weight_decay", 1e-4))
-    loss = str(opt_cfg.get("loss", "mse"))
-
-    if version == "v1":
-        return V1ReconstructionLitModule(
-            feature_columns=config["data"]["target_fields"],
-            model_config=dict(config["model"]),
-            objective="finetune",
-            learning_rate=lr,
-            weight_decay=weight_decay,
-        )
-
-    if version in {"v2", "timesbert"}:
-        return TimesBERTLitModule(
-            model=model_config(config),
-            lr=lr,
-            weight_decay=weight_decay,
-            loss=loss,
-        )
-
-    if version in {"default", "pointwise"}:
-        return ReconstructionLitModule(
-            model=model_config(config),
-            lr=lr,
-            weight_decay=weight_decay,
-            loss=loss,
-        )
-
-    raise ValueError(f"Unsupported model_version: {version}")
-
-def init_lightning(config: Dict[str, Any]) -> L.lightningModule:
+def init_lightning(config: Dict[str, Any]) -> L.LightningModule:
     # Seed
     seed = int(config.get("seed", 42))
     seed_everything(seed, workers=True)
 
     # Backbone
-    model_id = config.get("model_id", "Datadog/Toto-Open-Base-1.0")
-    pretrained_backbone = Toto.from_pretrained(model_id).model
-
-    model = _build_module(config)
+    model_id = config.get("pretrained_model", "PretrainedModel/timebert-base")
+    pretrained_backbone = Model.from_pretrained(model_id).model
     
-    # LightningModule params
-    mcfg = config.get("model", {})
-    dcfg = config.get("data", {})
-
-    lightning_module = TotoForFinetuning(
+    # LightningModule
+    lightning_module = ModelForFinetuning(
         pretrained_backbone=pretrained_backbone,
-        val_prediction_len=int(mcfg.get("val_prediction_len", 96)),
-        stable_steps=int(mcfg.get("stable_steps", 1000)),
-        decay_steps=int(mcfg.get("decay_steps", 1000)),
-        warmup_steps=int(mcfg.get("warmup_steps", 200)),
-        lr=float(mcfg.get("lr", 1e-4)),
-        min_lr=float(mcfg.get("min_lr", 1e-5)),
-        add_exogenous_features=bool(dcfg.get("add_exogenous_features", False)),
+        config=config,
     )
 
     device = config.get("device", "cuda" if torch.cuda.is_available() else "cpu")
@@ -90,7 +42,11 @@ def init_lightning(config: Dict[str, Any]) -> L.lightningModule:
     return lightning_module
 
 
-def get_datamodule(config: Dict[str, Any], setup: bool = False) -> FinetuneDataModule:
+def get_datamodule(
+    config: Dict[str, Any],
+    setup: bool = False,
+    output_dir: str | Path | None = None,
+) -> FinetuneDataModule:
     data_cfg = config["data"]
     dm = FinetuneDataModule(
         train_path=data_cfg["train_path"],
@@ -111,7 +67,10 @@ def get_datamodule(config: Dict[str, Any], setup: bool = False) -> FinetuneDataM
         
     if dm.scaler is None:
         raise RuntimeError("Finetune scaler was not initialized")
-    save_json(dm.scaler.to_dict(), config["outputs"]["root_dir"] / "scaler.json")
+    if output_dir is not None:
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        save_json(dm.scaler.to_dict(), output_dir / "scaler.json")
     return dm
 
 
@@ -125,6 +84,7 @@ def train(
     # Progress bar callback
     # -------------------
     callbacks: list[Callback] = [TQDMProgressBar(refresh_rate=int(tcfg.get("refresh_rate", 1)))]
+
     
     # -------------------
     # Checkpoint callback (optional, controlled via config)
@@ -151,6 +111,7 @@ def train(
         every_n_train_steps = cckpt.get("every_n_train_steps", None)
         every_n_epochs = cckpt.get("every_n_epochs", None)
         train_time_interval_minutes = cckpt.get("train_time_interval_minutes", None)
+        save_on_train_epoch_end = None
 
         if every_n_train_steps is None and every_n_epochs is None and train_time_interval_minutes is None:
             # Set the checkpoint saving after each validation check
@@ -181,6 +142,7 @@ def train(
             monitor=monitor_arg,
             mode=mode_arg,
             save_top_k=save_top_k_arg,
+            save_last=bool(cckpt.get("save_last", False)),
             every_n_train_steps=every_n_train_steps,
             every_n_epochs=every_n_epochs,
             train_time_interval=train_time_interval,
@@ -200,15 +162,25 @@ def train(
     # Trainer kwargs (including validation scheduling)
     # -------------------
     trainer_kwargs: Dict[str, Any] = dict(
-        max_steps=int(tcfg.get("max_steps", 3000)),
         log_every_n_steps=int(tcfg.get("log_every_n_steps", 1)),
         num_sanity_val_steps=int(tcfg.get("num_sanity_val_steps", 0)),
-        enable_progress_bar=bool(tcfg.get("enable_progress_bar", True)),
         val_check_interval=tcfg.get("val_check_interval", None),
         check_val_every_n_epoch=tcfg.get("check_val_every_n_epoch", None),
         callbacks=callbacks,
         logger=tb_logger,
     )
+    if "max_steps" in tcfg:
+        trainer_kwargs["max_steps"] = int(tcfg["max_steps"])
+    else:
+        trainer_kwargs["max_epochs"] = int(tcfg.get("max_epochs", 1))
+    if "accelerator" in tcfg:
+        trainer_kwargs["accelerator"] = tcfg["accelerator"]
+    if "devices" in tcfg:
+        trainer_kwargs["devices"] = tcfg["devices"]
+    if "precision" in tcfg:
+        trainer_kwargs["precision"] = tcfg["precision"]
+    if "deterministic" in tcfg:
+        trainer_kwargs["deterministic"] = bool(tcfg["deterministic"])
 
     trainer = Trainer(**trainer_kwargs)
     trainer.fit(lightning_module, datamodule=datamodule)
@@ -226,8 +198,9 @@ def train(
 
 
 def load_finetuned_module(
-    model_id: str,
+    pretrained_model: str,
     checkpoint_path: str,
+    config: Dict[str, Any],
     map_location: str | torch.device = "cpu",
 ) -> L.LightningModule:
     """
@@ -235,9 +208,8 @@ def load_finetuned_module(
 
     Parameters
     ----------
-    model_id : str
-        HuggingFace model identifier for the pretrained model
-        (e.g., "Datadog/Toto-Open-Base-1.0").
+    pretrained_model : str
+        Local pretrained model directory.
     checkpoint_path : str
         Path to the Lightning checkpoint file (.ckpt).
     map_location : str | torch.device, default="cpu"
@@ -249,16 +221,13 @@ def load_finetuned_module(
         The loaded and eval-ready finetuned model.
     """
     
-    # Dispatcher
-    Model, ModelForFinetuning = ModelDispatcher(model_id)
-    
-    # Load base model backbone from HuggingFace
-    pretrained_backbone = Model.from_pretrained(model_id).model
+    pretrained_backbone = Model.from_pretrained(pretrained_model).model
 
     # Load Lightning module from checkpoint
     model = ModelForFinetuning.load_from_checkpoint(  # type: ignore[operator]
         checkpoint_path=checkpoint_path,
         pretrained_backbone=pretrained_backbone,
+        config=config,
         map_location=map_location,
     )
     model.eval()

@@ -19,7 +19,7 @@ class ModelForFinetuning(L.LightningModule):
         config
     ) -> None:
         super().__init__()
-        self.save_hyperparameters()
+        self.save_hyperparameters(ignore=["pretrained_backbone"])
         
         # build backbone
         if pretrained_backbone is not None:

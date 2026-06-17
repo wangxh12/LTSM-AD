@@ -6,7 +6,17 @@
 *.log
 
 # datasets
-datasets
+datasets/pretrain/
+
+# checkpoints
+checkpoints/
+
+# log
+lightning_logs/
+
+# results
+results_dir/
+results/
 
 # pretrained models
 PretrainedModels

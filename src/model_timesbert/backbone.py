@@ -77,29 +77,13 @@ class TimesBERT(nn.Module):
 
         self.reset_parameters()
 
-    @classmethod
-    def from_config(cls, config: dict) -> "TimesBERTModel":
-        model_config = dict(config)
-        model_config.pop("model_type", None)
-        model_config.pop("model_id", None)
-        return cls(**model_config)
+    # @classmethod
+    # def from_config(cls, config: dict) -> "TimesBERTModel":
+    #     model_config = dict(config)
+    #     model_config.pop("model_type", None)
+    #     model_config.pop("model_id", None)
+    #     return cls(**model_config)
 
-    @classmethod
-    def from_pretrained(cls, path: str | Path) -> "TimesBERTModel":
-        path = Path(path)
-        with open(path / "config.json", "r", encoding="utf-8") as handle:
-            config = json.load(handle)
-        model = cls.from_config(config)
-        state_dict = load_file(path / "model.safetensors")
-        model.load_state_dict(state_dict, strict=True)
-        return model
-
-    def save_pretrained(self, path: str | Path) -> None:
-        path = Path(path)
-        path.mkdir(parents=True, exist_ok=True)
-        with open(path / "config.json", "w", encoding="utf-8") as handle:
-            json.dump(self.config, handle, ensure_ascii=False, indent=2)
-        save_file(self.state_dict(), path / "model.safetensors")
 
     def reset_parameters(self) -> None:
         nn.init.trunc_normal_(self.position_embedding, std=0.02)

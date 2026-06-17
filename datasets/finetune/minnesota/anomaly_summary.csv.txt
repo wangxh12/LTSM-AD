@@ -1,0 +1,4 @@
+dataset,source_file,output_file,original_length,slice_range_source_inclusive,slice_length,anomaly_ranges_relative_inclusive,anomaly_ranges_source_inclusive,anomaly_points,normal_points,csv_columns,feature_columns
+ThorFlight111,ThorFlight111/thor_flight111_studentgnssdeniednavfilter_2014_05_04.h5,process/anomaly/ThorFlight111.csv,13327,"[5000, 10500]",5501,"[[740, 1842], [3340, 3387], [4967, 5035]]","[[5740, 6842], [8340, 8387], [9967, 10035]]",1220,4281,121,118
+ThorFlight112,ThorFlight112/thor_flight112_studentgnssdeniednavfilter_2014_05_04.h5,process/anomaly/ThorFlight112.csv,10646,"[5000, 10500]",5501,"[[1316, 1740]]","[[6316, 6740]]",425,5076,121,118
+ThorFlight121,ThorFlight121/thor_flight121_studentgnssdeniednavfilter_2014_05_10.h5,process/anomaly/ThorFlight121.csv,27097,"[6600, 12100]",5501,"[[3558, 3881]]","[[10158, 10481]]",324,5177,124,121

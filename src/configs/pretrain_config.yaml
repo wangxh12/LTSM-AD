@@ -51,7 +51,7 @@ trainer:
   mask_ratio: 0.25
 
 outputs:
-  root_dir: outputs/uav_ad
+  root_dir: outputs/
 
 export:
   save_dir: pretrained/timebert-base

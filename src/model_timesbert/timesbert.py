@@ -49,17 +49,23 @@ class Model(nn.Module, ModelHubMixin):
         super().__init__()
         # config
         self.config = build_model_config(config)
-        model_kwargs = dict(self.config)
-        model_kwargs.pop("model_type", None)
-        model_kwargs.pop("model_id", None)
+        model_keys = {
+            "seq_len",
+            "num_features",
+            "patch_len",
+            "d_model",
+            "num_layers",
+            "n_heads",
+            "d_ffn",
+            "dropout",
+            "activation",
+            "norm_first",
+        }
+        model_kwargs = {key: self.config[key] for key in model_keys if key in self.config}
         
         # build model
         self.model = TimesBERT(**model_kwargs)
 
-
-    def load_from_checkpoint(self, checkpoint_path: str | Path) -> None:
-        pass
-    
     
     def _save_pretrained(self, save_directory: Path) -> None:
         save_directory = Path(save_directory)
@@ -116,6 +122,7 @@ class Model(nn.Module, ModelHubMixin):
             config = json.load(f)
 
         # 如果 from_pretrained 额外传入参数，可以覆盖 config
+        model_kwargs.pop("config", None)
         if model_kwargs:
             config.update(model_kwargs)
 

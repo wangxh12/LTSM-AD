@@ -32,3 +32,18 @@ When running experiments, use commands like:
 
 ```bash
 ssh root@h100 "cd /workspace/code/LTSM-AD && conda run -n ltsm python <script>.py"
+
+
+Research code policy
+
+This repository is a research prototype, not a production software library.
+
+When modifying code, follow these principles:
+
+Prefer explicit assumptions over hidden compatibility logic.
+Prefer raising clear errors over silently guessing defaults.
+Do not add compatibility branches unless they are explicitly needed by the current experiment.
+Do not preserve old behavior just for backward compatibility unless asked.
+Do not write broad try/except blocks unless the exception is expected and scientifically meaningful.
+Do not auto-create missing experimental configuration values unless explicitly requested.
+Do not infer important model, data, or training parameters from unrelated fields.

@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 import lightning as L
 import torch
@@ -13,7 +12,7 @@ from lightning.pytorch.loggers import TensorBoardLogger
 from src.data import PretrainDataModule
 from src.model_timesbert.lightning import ModelForPreTraining
 from src.model_timesbert.timesbert import Model
-from src.scripts.utils import load_config, make_run_dir, save_config, save_json, seed_everything
+from src.scripts.utils import save_config, save_json, seed_everything
 
 
 def target_fields(config: dict[str, Any]) -> list[str]:
@@ -68,17 +67,18 @@ def train(
     config: dict[str, Any],
 ) -> tuple[L.LightningModule, str | None, float | None]:
     
-    run_dir = Path(config["runtime"]["run_dir"])
     trainer_cfg = config.get("trainer", {})
     early_cfg = config.get("early_stopping", {})
     checkpoint_cfg = config.get("checkpoint", {})
     logging_cfg = config.get("logging", {})
+    checkpoint_dir = Path(checkpoint_cfg.get("dirpath", checkpoint_cfg.get("root_dir", "checkpoints")))
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
     # Checkpoint callback
     monitor = str(checkpoint_cfg.get("monitor", early_cfg.get("monitor", "val_loss")))
     mode = str(checkpoint_cfg.get("mode", early_cfg.get("mode", "min")))
     checkpoint = ModelCheckpoint(
-        dirpath=run_dir / "checkpoints",
+        dirpath=str(checkpoint_dir),
         filename=str(checkpoint_cfg.get("filename", "{epoch:03d}-{val_loss:.6f}")),
         monitor=monitor,
         mode=mode,
@@ -101,22 +101,29 @@ def train(
 
     # TensorBoard logger
     logger = TensorBoardLogger(
-        save_dir=str(logging_cfg.get("save_dir", run_dir / "logs")),
+        save_dir=str(logging_cfg.get("save_dir", "lightning_logs")),
         name=str(logging_cfg.get("name", "pretrain")),
     )
     
-    trainer = Trainer(
-        max_epochs=int(trainer_cfg.get("max_epochs", 50)),
-        accelerator=trainer_cfg.get("accelerator", "auto"),
-        devices=trainer_cfg.get("devices", 1),
-        precision=trainer_cfg.get("precision", "32-true"),
-        callbacks=callbacks,
-        logger=logger,
-        log_every_n_steps=int(trainer_cfg.get("log_every_n_steps", 20)),
-        deterministic=bool(trainer_cfg.get("deterministic", False)),
-        num_sanity_val_steps=int(trainer_cfg.get("num_sanity_val_steps", 0)),
-        enable_progress_bar=bool(trainer_cfg.get("enable_progress_bar", True)),
-    )
+    trainer_kwargs: dict[str, Any] = {
+        "accelerator": trainer_cfg.get("accelerator", "auto"),
+        "devices": trainer_cfg.get("devices", 1),
+        "precision": trainer_cfg.get("precision", "32-true"),
+        "callbacks": callbacks,
+        "logger": logger,
+        "log_every_n_steps": int(trainer_cfg.get("log_every_n_steps", 20)),
+        "deterministic": bool(trainer_cfg.get("deterministic", False)),
+        "num_sanity_val_steps": int(trainer_cfg.get("num_sanity_val_steps", 0)),
+    }
+    if "max_steps" in trainer_cfg:
+        trainer_kwargs["max_steps"] = int(trainer_cfg["max_steps"])
+    else:
+        trainer_kwargs["max_epochs"] = int(trainer_cfg.get("max_epochs", 50))
+    for key in ("val_check_interval", "check_val_every_n_epoch", "limit_train_batches", "limit_val_batches"):
+        if trainer_cfg.get(key) is not None:
+            trainer_kwargs[key] = trainer_cfg[key]
+
+    trainer = Trainer(**trainer_kwargs)
     
     trainer.fit(lightning_module, datamodule=datamodule)
     best_checkpoint = checkpoint.best_model_path or None
@@ -129,6 +136,10 @@ def save_pretrained(
     config: dict[str, Any],
     checkpoint_path: str | Path | None,
     best_val_loss: float | None,
+    dataset_name: str | None = None,
+    checkpoint_dir: str | Path | None = None,
+    logging_dir: str | Path | None = None,
+    csv_paths: Iterable[str | Path] | None = None,
 ) -> Path:
     model_id = config.get("model_id")
     assert model_id, "model_id must be specified in config for saving pretrained model"
@@ -149,10 +160,22 @@ def save_pretrained(
     wrapper.save_pretrained(pretrained_model_dir)
 
     # 4. 保存额外训练信息
+    checkpoint_cfg = config.get("checkpoint", {})
+    logging_cfg = config.get("logging", {})
+    if checkpoint_dir is None and checkpoint_cfg.get("dirpath") is not None:
+        checkpoint_dir = checkpoint_cfg["dirpath"]
+    if logging_dir is None and logging_cfg:
+        logging_dir = Path(logging_cfg.get("save_dir", "lightning_logs")) / str(logging_cfg.get("name", "pretrain"))
+
     metadata = {
         "model_id": model_id,
+        "dataset_name": dataset_name,
+        "best_checkpoint": str(checkpoint_path) if checkpoint_path else None,
         "checkpoint_path": str(checkpoint_path) if checkpoint_path else None,
         "best_val_loss": best_val_loss,
+        "checkpoint_dir": str(checkpoint_dir) if checkpoint_dir is not None else None,
+        "logging_dir": str(logging_dir) if logging_dir is not None else None,
+        "csv_paths": [str(path) for path in csv_paths] if csv_paths is not None else [],
         "target_fields": target_fields(config),
         "seq_len": int(config["data"]["seq_len"]),
         "num_features": len(target_fields(config)),
