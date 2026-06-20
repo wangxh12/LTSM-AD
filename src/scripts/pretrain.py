@@ -10,9 +10,8 @@ from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint, TQDMProg
 from lightning.pytorch.loggers import TensorBoardLogger
 
 from src.data import PretrainDataModule
-from src.model_timesbert.lightning import ModelForPreTraining
-from src.model_timesbert.timesbert import Model
-from src.scripts.utils import save_config, save_json, seed_everything
+from src.scripts.utils import load_model_package, save_config, save_json, seed_everything
+
 
 
 def target_fields(config: dict[str, Any]) -> list[str]:
@@ -47,6 +46,8 @@ def get_datamodule(config: dict[str, Any], setup: bool = False) -> PretrainDataM
 def init_lightning(config: dict[str, Any]) -> L.LightningModule:
     # Seed
     seed_everything(int(config.get("seed", 42)))
+    
+    Model, ModelForPreTraining, _ = load_model_package(config.get("model_family", "model_timesbert"))
     
     # Backbone (from config)
     backbone = Model(config).model
@@ -132,7 +133,7 @@ def train(
 
 
 def save_pretrained(
-    module: ModelForPreTraining,
+    module: L.LightningModule,
     config: dict[str, Any],
     checkpoint_path: str | Path | None,
     best_val_loss: float | None,
@@ -149,6 +150,8 @@ def save_pretrained(
     print(f"Exporting pretrained model to {pretrained_model_dir}")
     # exit(0)
     pretrained_model_dir.mkdir(parents=True, exist_ok=True)
+
+    Model, _, _ = load_model_package(config.get("model_family", "model_timesbert"))
 
     # 1. 重新构造 wrapper
     wrapper = Model(config)
@@ -193,8 +196,9 @@ def load_pretraining_module(
     config: dict[str, Any],
     checkpoint_path: str | Path,
     map_location: str | torch.device = "cpu",
-) -> ModelForPreTraining:
+) -> L.LightningModule:
     """Load a pretrained LightningModule from a Lightning checkpoint."""
+    Model, ModelForPreTraining, _ = load_model_package(config.get("model_family", "model_timesbert"))
     wrapper = Model(config)
 
     module = ModelForPreTraining.load_from_checkpoint(

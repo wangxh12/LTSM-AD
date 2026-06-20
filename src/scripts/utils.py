@@ -10,15 +10,17 @@ import numpy as np
 import torch
 import yaml
 
-try:
-    from lightning.pytorch import Trainer
-    from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
-    from lightning.pytorch.loggers import CSVLogger
-except ImportError:  # pragma: no cover - kept for older environments
-    from pytorch_lightning import Trainer
-    from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
-    from pytorch_lightning.loggers import CSVLogger
 
+from importlib import import_module
+
+def load_model_package(model_family: str):
+    model_module = import_module(f"src.{model_family}.model")
+    lightning_module = import_module(f"src.{model_family}.lightning")
+    return (
+        model_module.Model,
+        lightning_module.ModelForPreTraining,
+        lightning_module.ModelForFinetuning,
+    )
 
 def load_config(path: str | Path) -> dict[str, Any]:
     with open(path, "r", encoding="utf-8") as handle:

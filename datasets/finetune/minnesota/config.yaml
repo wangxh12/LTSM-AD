@@ -1,0 +1,7 @@
+train:
+  train_flight104.csv: 0:12000:16000
+
+test:
+  ThorFlight112.csv: 0:1200:1200
+  ThorFlight121.csv: 0:3200:3200
+  ThorFlight111.csv: 0:700:700

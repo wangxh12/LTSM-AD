@@ -11,11 +11,8 @@ from lightning.pytorch import Trainer, seed_everything
 from lightning.pytorch.callbacks import Callback, ModelCheckpoint, TQDMProgressBar
 from lightning.pytorch.loggers import TensorBoardLogger
 
-from src.data.csv_windows import FinetuneDataModule
-from src.scripts.utils import save_json
-
-from src.model_timesbert.lightning import ModelForFinetuning
-from src.model_timesbert.timesbert import Model
+from src.data.finetune_datamodule import FinetuneDataModule
+from src.scripts.utils import load_model_package, save_json
 
 def load_config(config_path: str) -> Dict[str, Any]:
     with open(config_path, "r") as f:
@@ -26,6 +23,8 @@ def init_lightning(config: Dict[str, Any]) -> L.LightningModule:
     # Seed
     seed = int(config.get("seed", 42))
     seed_everything(seed, workers=True)
+    
+    Model, _, ModelForFinetuning = load_model_package(config.get("model_family", "model_timesbert"))
 
     # Backbone
     model_id = config.get("pretrained_model", "PretrainedModel/timebert-base")
@@ -47,30 +46,14 @@ def get_datamodule(
     setup: bool = False,
     output_dir: str | Path | None = None,
 ) -> FinetuneDataModule:
-    data_cfg = config["data"]
-    dm = FinetuneDataModule(
-        train_path=data_cfg["train_path"],
-        test_paths=data_cfg["test_paths"],
-        feature_names=data_cfg["target_fields"],
-        seq_len=int(data_cfg["seq_len"]),
-        stride=int(data_cfg.get("stride", 1)),
-        eval_stride=int(data_cfg.get("eval_stride", data_cfg.get("stride", 1))),
-        split_ratio=float(data_cfg.get("train_val_split", 0.9)),
-        batch_size=int(data_cfg.get("batch_size", data_cfg.get("batch_size", 256))),
-        num_workers=int(data_cfg.get("num_workers", 0)),
-        label_col=data_cfg.get("label_col", "label"),
-        time_col=data_cfg.get("timestamp_col", "time"),
-        scaler_type=str(data_cfg.get("scaler_type", config.get("scaler_type", "standard"))),
-    )
+    dm = FinetuneDataModule.from_config(config)
     if setup:
         dm.setup(None)
-        
-    if dm.scaler is None:
-        raise RuntimeError("Finetune scaler was not initialized")
+
     if output_dir is not None:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-        save_json(dm.scaler.to_dict(), output_dir / "scaler.json")
+        save_json(dm.scalers_to_dict(), output_dir / "scalers.json")
     return dm
 
 
@@ -221,6 +204,7 @@ def load_finetuned_module(
         The loaded and eval-ready finetuned model.
     """
     
+    Model, _, ModelForFinetuning = load_model_package(config.get("model_family", "model_timesbert"))
     pretrained_backbone = Model.from_pretrained(pretrained_model).model
 
     # Load Lightning module from checkpoint

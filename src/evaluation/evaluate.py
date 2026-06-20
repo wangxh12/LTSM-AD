@@ -51,7 +51,11 @@ def evaluate_model(
     metrics_rows: list[dict[str, object]] = []
     test_batch_size = int(dcfg.get("batch_size", 256))
     num_workers = int(dcfg.get("num_workers", 0))
-    for test_path in dcfg["test_paths"]:
+    test_files = getattr(data, "test_files", None)
+    if not test_files:
+        raise RuntimeError("DataModule must expose a non-empty test_files list for evaluation")
+
+    for test_path in test_files:
         test_path = Path(test_path)
         dataset_name = test_path.stem
         dataset = data.make_test_dataset(test_path)

@@ -4,11 +4,13 @@ pretrained_model: PretrainedModels/timebert-base
 data:
   dataset_name: minnesota
   # data path
-  train_path: datasets/finetune/minnesota/train_flight104.csv
-  test_paths:
+  root_patch: datasets/finetune/minnesota
+  train: 
+    - train_flight104.csv
+  test:
     # - datasets/finetune/minnesota/ThorFlight111.csv
     # - datasets/finetune/minnesota/ThorFlight112.csv
-    - datasets/finetune/minnesota/ThorFlight121.csv
+    - ThorFlight121.csv
 
   # fields
   target_fields:

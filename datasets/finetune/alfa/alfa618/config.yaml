@@ -1,0 +1,14 @@
+train:
+  carbonZ_2018-07-30-16-39-00_3_no_failure.csv: 0:1581:1977
+  carbonZ_2018-09-11-15-05-11_2_no_failure.csv: 0:1348:1685
+  carbonZ_2018-10-05-14-34-20_1_no_failure.csv: 0:1336:1670
+  carbonZ_2018-10-05-14-37-22_1_no_failure.csv: 0:1453:1817
+  carbonZ_2018-10-05-15-52-12_1_no_failure.csv: 0:1792:2241
+
+test:
+  carbonZ_2018-07-18-15-53-31_2_engine_failure.csv: 0:3000:3000
+  carbonZ_2018-07-30-16-29-45_engine_failure.csv: 0:1800:1800
+  carbonZ_2018-09-11-14-41-51_elevator_failure.csv: 0:1800:1800
+  carbonZ_2018-09-11-15-06-34_1_rudder_right_failure.csv: 0:900:900
+  carbonZ_2018-09-11-17-55-30_1_right_aileron_failure.csv: 0:1800:1800
+  carbonZ_2018-10-05-14-37-22_3_left_aileron_failure.csv: 0:1200:1200
