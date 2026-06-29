@@ -1,0 +1,77 @@
+seed: 42
+model_family: model_timesbert
+model_id: timesbert-minnesota104-mpm
+
+data:
+  dataset_name: minnesota104
+  root_path: datasets/finetune/minnesota/minnesota618
+  pattern: train_flight104.csv
+
+  target_fields:
+    - navalt
+    - alt
+    - h
+    - navvn
+    - navve
+    - navvd
+    - vn
+    - ve
+    - vd
+    - p
+    - q
+    - r
+  label_col: label
+  timestamp_col: time
+
+  seq_len: 32
+  stride: 1
+  train_val_split: 0.9
+  batch_size: 256
+  num_workers: 0
+  scaler_type: minmax
+
+model:
+  d_model: 128
+  n_heads: 4
+  num_layers: 4
+  d_ffn: 512
+  patch_len: 4
+  dropout: 0.1
+  activation: gelu
+  norm_first: false
+
+optimization:
+  lr: 0.0002
+  weight_decay: 0.01
+
+trainer:
+  max_epochs: 50
+  accelerator: auto
+  devices: 1
+  precision: 32-true
+  log_every_n_steps: 20
+  deterministic: true
+  mask_ratio: 0.25
+  num_sanity_val_steps: 0
+
+early_stopping:
+  enabled: true
+  monitor: val_loss
+  mode: min
+  patience: 8
+  min_delta: 0.0
+
+checkpoint:
+  root_dir: checkpoints
+  filename: "{epoch:03d}-{val_loss:.6f}"
+  monitor: val_loss
+  mode: min
+  save_top_k: 1
+  save_last: true
+
+logging:
+  save_dir: lightning_logs
+
+export:
+  save_dir: PretrainedModels
+  export_best: true

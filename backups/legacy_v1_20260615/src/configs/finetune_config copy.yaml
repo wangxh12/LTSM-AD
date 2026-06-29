@@ -1,0 +1,65 @@
+seed: 42
+
+features:
+  - navalt
+  - alt
+  - h
+  - navvn
+  - navve
+  - navvd
+  - vn
+  - ve
+  - vd
+  - p
+  - q
+  - r
+
+data:
+  seq_len: 32
+  stride: 1
+  train_val_split: 0.9
+  batch_size: 256
+  num_workers: 4
+  label_col: label
+  time_col: time
+
+model:
+  d_model: 128
+  n_heads: 4
+  num_layers: 2
+  d_ffn: 256
+  dropout: 0.1
+
+optimization:
+  lr: 0.0005
+  weight_decay: 0.0001
+  loss: mae
+
+trainer:
+  max_epochs: 1
+  early_stopping_patience: 8
+  accelerator: auto
+  devices: 1
+  precision: 32-true
+  log_every_n_steps: 20
+  deterministic: false
+
+finetune:
+  train_path: datasets/finetune/minnesota/train_flight104.csv
+  test_paths:
+    - datasets/finetune/minnesota/ThorFlight111.csv
+    - datasets/finetune/minnesota/ThorFlight112.csv
+    - datasets/finetune/minnesota/ThorFlight121.csv
+  pretrained_checkpoint:
+  checkpoint:
+  batch_size: 256
+  lr: 0.0005
+  trainer:
+    max_epochs: 50
+
+evaluation:
+  threshold_percentile: 95
+
+outputs:
+  root_dir: outputs/uav_ad
+

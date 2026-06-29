@@ -4,9 +4,10 @@ from typing import Any
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import ConcatDataset, DataLoader, Dataset
+from torch.utils.data import SequentialSampler
 
-from src.data.csv_windows import WindowDataset
+from src.data.csv_windows import FlightDataset
 
 
 def _as_numpy(values: np.ndarray | torch.Tensor) -> np.ndarray:
@@ -26,7 +27,7 @@ def collect_window_point_scores(
     model.eval()
     scores: list[np.ndarray] = []
     for batch in loader:
-        x = batch["x"].to(device)
+        x = batch.series.to(device)
         reconstruction = model(x)
         batch_scores = (reconstruction - x).abs().mean(dim=-1)
         scores.append(_as_numpy(batch_scores).reshape(-1))
@@ -36,10 +37,40 @@ def collect_window_point_scores(
 
 
 @torch.no_grad()
+def collect_dataset_point_scores(
+    model: torch.nn.Module,
+    dataset: Dataset,
+    device: torch.device,
+    batch_size: int,
+    num_workers: int,
+) -> np.ndarray:
+    """Return scores using the same overlap averaging applied to test data."""
+
+    if isinstance(dataset, FlightDataset):
+        loader = DataLoader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            pin_memory=True,
+            persistent_workers=num_workers > 0,
+        )
+        return reconstruct_dataset_points(model, loader, dataset, device)["scores"]
+    if isinstance(dataset, ConcatDataset):
+        return np.concatenate(
+            [
+                collect_dataset_point_scores(model, child, device, batch_size, num_workers)
+                for child in dataset.datasets
+            ]
+        )
+    raise TypeError(f"Point-score reconstruction requires WindowDataset or ConcatDataset, got {type(dataset)!r}")
+
+
+@torch.no_grad()
 def reconstruct_dataset_points(
     model: torch.nn.Module,
     loader: DataLoader,
-    dataset: WindowDataset,
+    dataset: FlightDataset,
     device: torch.device,
 ) -> dict[str, np.ndarray]:
     """Average overlapping window reconstructions and scores back to point level."""
@@ -47,33 +78,51 @@ def reconstruct_dataset_points(
     model.eval()
     series_length, num_features = dataset.series.shape
     recon_sum = np.zeros((series_length, num_features), dtype=np.float64)
+    feature_score_sum = np.zeros((series_length, num_features), dtype=np.float64)
     score_sum = np.zeros(series_length, dtype=np.float64)
     counts = np.zeros(series_length, dtype=np.float64)
 
+    if not isinstance(loader.sampler, SequentialSampler):
+        raise ValueError("Point reconstruction requires a DataLoader with sequential sampling")
+
+    window_offset = 0
     for batch in loader:
-        x = batch["x"].to(device)
+        x = batch.series.to(device)
         reconstruction = model(x)
-        scores = (reconstruction - x).abs().mean(dim=-1)
+        feature_scores = (reconstruction - x).abs()
+        scores = feature_scores.mean(dim=-1)
         reconstruction_np = _as_numpy(reconstruction)
+        feature_scores_np = _as_numpy(feature_scores)
         scores_np = _as_numpy(scores)
-        starts = _as_numpy(batch["start"]).astype(np.int64)
+        batch_size = x.shape[0]
+        starts = dataset.starts[window_offset : window_offset + batch_size]
+        window_offset += batch_size
 
         for row, start in enumerate(starts):
             end = start + dataset.seq_len
             recon_sum[start:end] += reconstruction_np[row]
+            feature_score_sum[start:end] += feature_scores_np[row]
             score_sum[start:end] += scores_np[row]
             counts[start:end] += 1.0
 
+    if window_offset != len(dataset):
+        raise ValueError(
+            f"DataLoader yielded {window_offset} windows, but the dataset contains {len(dataset)}"
+        )
+
     valid = counts > 0
     reconstruction = np.full_like(recon_sum, np.nan, dtype=np.float32)
+    point_feature_scores = np.full_like(feature_score_sum, np.nan, dtype=np.float32)
     point_scores = np.full(series_length, np.nan, dtype=np.float32)
     reconstruction[valid] = (recon_sum[valid] / counts[valid, None]).astype(np.float32)
+    point_feature_scores[valid] = (feature_score_sum[valid] / counts[valid, None]).astype(np.float32)
     point_scores[valid] = (score_sum[valid] / counts[valid]).astype(np.float32)
 
     labels = dataset.labels if dataset.labels is not None else np.zeros(series_length, dtype=np.int64)
     return {
         "target": dataset.series.astype(np.float32),
         "reconstruction": reconstruction,
+        "feature_scores": point_feature_scores,
         "scores": point_scores,
         "labels": labels.astype(np.int64),
         "valid": valid,

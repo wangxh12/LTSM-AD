@@ -6,6 +6,8 @@ import lightning as L
 import torch
 from torch.nn import functional as F
 
+from src.data.utils import Timeseries
+
 from .transformer import ReconstructionTransformer
 
 
@@ -36,8 +38,8 @@ class ReconstructionLitModule(L.LightningModule):
             return F.l1_loss(prediction, target)
         raise ValueError(f"Unsupported loss: {self.loss_name}")
 
-    def _shared_step(self, batch: dict[str, torch.Tensor], stage: str) -> torch.Tensor:
-        x = batch["x"]
+    def _shared_step(self, batch: Timeseries, stage: str) -> torch.Tensor:
+        x = batch.series
         prediction = self(x)
         loss = self._loss(prediction, x)
         self.log(
@@ -50,10 +52,10 @@ class ReconstructionLitModule(L.LightningModule):
         )
         return loss
 
-    def training_step(self, batch: dict[str, torch.Tensor], _batch_idx: int) -> torch.Tensor:
+    def training_step(self, batch: Timeseries, _batch_idx: int) -> torch.Tensor:
         return self._shared_step(batch, "train")
 
-    def validation_step(self, batch: dict[str, torch.Tensor], _batch_idx: int) -> torch.Tensor:
+    def validation_step(self, batch: Timeseries, _batch_idx: int) -> torch.Tensor:
         return self._shared_step(batch, "val")
 
     def configure_optimizers(self) -> torch.optim.Optimizer:
@@ -116,8 +118,8 @@ class PretrainLitModule(ReconstructionLitModule):
             raise ValueError(f"Unsupported loss: {self.loss_name}")
         return error[mask].mean()
 
-    def _shared_step(self, batch: dict[str, torch.Tensor], stage: str) -> torch.Tensor:
-        x = batch["x"]
+    def _shared_step(self, batch: Timeseries, stage: str) -> torch.Tensor:
+        x = batch.series
         mask = self._random_block_mask(x)
         masked_x = torch.where(mask, self.mask_token.to(dtype=x.dtype, device=x.device), x)
         prediction = self(masked_x)

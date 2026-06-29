@@ -1,0 +1,64 @@
+seed: 42
+model_version: v1
+features:
+  - field.angular_velocity.x
+  - field.angular_velocity.y
+  - field.angular_velocity.z
+  - field.linear_acceleration.x
+  - field.linear_acceleration.y
+  - field.linear_acceleration.z
+  - field.magnetic_field.x
+  - field.magnetic_field.y
+  - field.magnetic_field.z
+  - field.fluid_pressure
+  - field.temperature
+  - field.measured.pitch
+  - field.measured.roll
+  - field.measured.yaw
+  - field.alt_error
+  - field.aspd_error
+  - field.xtrack_error
+  - field.wp_dist
+data:
+  seq_len: 64
+  stride: 1
+  eval_stride: 32
+  train_val_split: 0.9
+  batch_size: 256
+  num_workers: 0
+  label_col: label
+  scaler_type: minmax
+  train_path: datasets/finetune/alfa/alfa615/train_labeled.csv
+  test_paths:
+    - datasets/finetune/alfa/alfa615/test_labeled.csv
+model:
+  hidden_size: 128
+  num_layers: 3
+  num_heads: 4
+  ffn_size: 512
+  dropout: 0.1
+  rms_norm_eps: 0.000001
+  rope_theta: 10000.0
+optimization:
+  lr: 0.0002
+  weight_decay: 0.01
+  loss: mse
+trainer:
+  max_epochs: 60
+  early_stopping_patience: 8
+  accelerator: auto
+  devices: 1
+  precision: 32-true
+  log_every_n_steps: 20
+  deterministic: true
+finetune:
+  pretrained_checkpoint: null
+  checkpoint: null
+  batch_size: 256
+  lr: 0.0002
+  trainer:
+    max_epochs: 60
+evaluation:
+  threshold_percentile: 95
+outputs:
+  root_dir: outputs/uav_ad_model_v1_legacy_alfa

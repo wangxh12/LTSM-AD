@@ -1,0 +1,90 @@
+seed: 42
+model_family: model_v1
+model_id: v1-alfa-scratch
+pretrained_model: null
+
+data:
+  datamodule: split_csv
+  dataset_name: alfa622
+  root_path: datasets/finetune/alfa/alfa622
+
+  train: train.csv
+  val: val.csv
+  test: 
+    # - test.csv
+    - carbonZ_2018-07-18-15-53-31_2_engine_failure.csv
+    - carbonZ_2018-07-30-16-29-45_engine_failure.csv
+    - carbonZ_2018-09-11-14-41-51_elevator_failure.csv
+    - carbonZ_2018-09-11-15-06-34_1_rudder_right_failure.csv
+    - carbonZ_2018-09-11-17-55-30_1_right_aileron_failure.csv
+    - carbonZ_2018-10-05-14-37-22_3_left_aileron_failure.csv
+
+
+  target_fields:
+    - field.angular_velocity.x
+    - field.angular_velocity.y
+    - field.angular_velocity.z
+    - field.linear_acceleration.x
+    - field.linear_acceleration.y
+    - field.linear_acceleration.z
+    - field.magnetic_field.x
+    - field.magnetic_field.y
+    - field.magnetic_field.z
+    - field.fluid_pressure
+    - field.temperature
+    - field.measured.pitch
+    - field.measured.roll
+    - field.measured.yaw
+    - field.alt_error
+    - field.aspd_error
+    - field.xtrack_error
+    - field.wp_dist
+  label_col: label
+  timestamp_col: null
+
+  seq_len: 40
+  stride: 1
+  eval_stride: 1
+  batch_size: 256
+  num_workers: 4
+  scaler_type: minmax
+
+model:
+  hidden_size: 128
+  num_layers: 2
+  num_heads: 4
+  ffn_size: 256
+  dropout: 0.1
+  rms_norm_eps: 0.000001
+  rope_theta: 10000.0
+
+optimization:
+  lr: 0.0001
+  weight_decay: 0.0001
+
+trainer:
+  max_epochs: 50
+  early_stopping_patience: 3
+  accelerator: auto
+  devices: 1
+  precision: 32-true
+  log_every_n_steps: 20
+  deterministic: false
+  num_sanity_val_steps: 0
+
+evaluation:
+  threshold_percentile: 95
+
+checkpoint:
+  root_dir: checkpoints
+  filename: "{epoch}-{step}-{val_loss:.4f}"
+  monitor: val_loss
+  mode: min
+  save_top_k: 1
+  save_last: true
+
+logging:
+  save_dir: lightning_logs
+
+results:
+  root_dir: results_dir

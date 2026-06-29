@@ -1,30 +1,16 @@
 seed: 42
-model_family: model_itransformer
-pretrained_model: PretrainedModels/itransformer-alfa-base
+model_family: model_v1
+model_id: v1-alfa-scratch
+pretrained_model: null
 
 data:
-  dataset_name: alfa618
-  root_path: datasets/finetune/alfa/alfa618
+  datamodule: split_csv
+  dataset_name: alfa615
+  root_path: datasets/finetune/alfa/alfa615
 
-  train:
-    - carbonZ_2018-07-30-16-39-00_3_no_failure.csv
-    - carbonZ_2018-09-11-15-05-11_2_no_failure.csv
-    - carbonZ_2018-10-05-14-34-20_1_no_failure.csv
-    - carbonZ_2018-10-05-14-37-22_1_no_failure.csv
-    - carbonZ_2018-10-05-15-52-12_1_no_failure.csv
-  val:
-    - carbonZ_2018-07-30-16-39-00_3_no_failure.csv
-    - carbonZ_2018-09-11-15-05-11_2_no_failure.csv
-    - carbonZ_2018-10-05-14-34-20_1_no_failure.csv
-    - carbonZ_2018-10-05-14-37-22_1_no_failure.csv
-    - carbonZ_2018-10-05-15-52-12_1_no_failure.csv
-  test:
-    - carbonZ_2018-07-18-15-53-31_2_engine_failure.csv
-    - carbonZ_2018-07-30-16-29-45_engine_failure.csv
-    - carbonZ_2018-09-11-14-41-51_elevator_failure.csv
-    - carbonZ_2018-09-11-15-06-34_1_rudder_right_failure.csv
-    - carbonZ_2018-09-11-17-55-30_1_right_aileron_failure.csv
-    - carbonZ_2018-10-05-14-37-22_3_left_aileron_failure.csv
+  train: train_labeled.csv
+  val: val_labeled.csv
+  test: test_labeled.csv
 
   target_fields:
     - field.angular_velocity.x
@@ -45,7 +31,7 @@ data:
     - field.aspd_error
     - field.xtrack_error
     - field.wp_dist
-  label_col: fault_state
+  label_col: label
   timestamp_col: time
 
   seq_len: 40
@@ -53,16 +39,16 @@ data:
   eval_stride: 1
   batch_size: 256
   num_workers: 4
-  scaler_type: standard
+  scaler_type: minmax
 
 model:
-  d_model: 128
+  hidden_size: 128
   num_layers: 2
   num_heads: 4
-  d_ffn: 256
+  ffn_size: 256
   dropout: 0.1
-  activation: gelu
-  norm_first: false
+  rms_norm_eps: 0.000001
+  rope_theta: 10000.0
 
 optimization:
   lr: 0.0001

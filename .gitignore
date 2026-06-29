@@ -6,7 +6,11 @@
 *.log
 
 # datasets
-datasets/pretrain/
+datasets/
+# datasets/pretrain/
+
+# bak
+/*.bak*
 
 # checkpoints
 checkpoints/

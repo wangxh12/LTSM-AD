@@ -8,10 +8,12 @@ import torch
 import yaml
 import lightning as L
 from lightning.pytorch import Trainer, seed_everything
-from lightning.pytorch.callbacks import Callback, ModelCheckpoint, TQDMProgressBar
+from lightning.pytorch.callbacks import Callback, EarlyStopping, ModelCheckpoint, TQDMProgressBar
 from lightning.pytorch.loggers import TensorBoardLogger
 
-from src.data.finetune_datamodule import FinetuneDataModule
+from src.data.csv_windows import FinetuneDataModule as CsvWindowsFinetuneDataModule
+from src.data.finetune_datamodule import FinetuneDataModule as FlightSplitFinetuneDataModule
+from src.data.split_csv_finetune_datamodule import SplitCsvFinetuneDataModule
 from src.scripts.utils import load_model_package, save_json
 
 def load_config(config_path: str) -> Dict[str, Any]:
@@ -26,9 +28,13 @@ def init_lightning(config: Dict[str, Any]) -> L.LightningModule:
     
     Model, _, ModelForFinetuning = load_model_package(config.get("model_family", "model_timesbert"))
 
-    # Backbone
-    model_id = config.get("pretrained_model", "PretrainedModel/timebert-base")
-    pretrained_backbone = Model.from_pretrained(model_id).model
+    pretrained_model = config.get("pretrained_model")
+    if pretrained_model is None:
+        pretrained_backbone = None
+    elif isinstance(pretrained_model, str):
+        pretrained_backbone = Model.from_pretrained(pretrained_model).model
+    else:
+        raise TypeError(f"pretrained_model must be a string path or null, got {pretrained_model!r}")
     
     # LightningModule
     lightning_module = ModelForFinetuning(
@@ -45,8 +51,25 @@ def get_datamodule(
     config: Dict[str, Any],
     setup: bool = False,
     output_dir: str | Path | None = None,
-) -> FinetuneDataModule:
-    dm = FinetuneDataModule.from_config(config)
+) -> L.LightningDataModule:
+    datamodule_name = config["data"].get("datamodule", "")
+    if datamodule_name is None:
+        datamodule_name = ""
+
+    datamodule_classes = {
+        "csv_windows": CsvWindowsFinetuneDataModule,
+        "flight_split": FlightSplitFinetuneDataModule, # 按config.yaml划分
+        "split_csv": SplitCsvFinetuneDataModule, # train和val都是一个csv, test可以是多个， 用train来归一化val和test
+    }
+    try:
+        datamodule_class = datamodule_classes[datamodule_name]
+    except KeyError as exc:
+        raise ValueError(
+            "data.datamodule must be one of '', 'csv_windows', 'flight_split', or 'split_csv'; "
+            f"got {datamodule_name!r}"
+        ) from exc
+
+    dm = datamodule_class.from_config(config)
     if setup:
         dm.setup(None)
 
@@ -58,7 +81,7 @@ def get_datamodule(
 
 
 def train(
-    lightning_module, datamodule: FinetuneDataModule, config: Dict[str, Any]
+    lightning_module, datamodule: L.LightningDataModule, config: Dict[str, Any]
 ):
     tcfg = config.get("trainer", {})
     lcfg = config.get("logging", {})
@@ -73,6 +96,7 @@ def train(
     # Checkpoint callback (optional, controlled via config)
     # -------------------
     cckpt = config.get("checkpoint", {})
+    early_cfg = config.get("early_stopping", {})
 
     # Only add ModelCheckpoint if any of the relevant options are present
     use_checkpoint = "dirpath" in cckpt.keys()
@@ -133,6 +157,17 @@ def train(
         )
         callbacks.append(checkpoint_callback)
 
+    early_stopping_patience = early_cfg.get("patience", tcfg.get("early_stopping_patience"))
+    if early_stopping_patience is not None:
+        callbacks.append(
+            EarlyStopping(
+                monitor=str(early_cfg.get("monitor", cckpt.get("monitor", "val_loss"))),
+                mode=str(early_cfg.get("mode", cckpt.get("mode", "min"))),
+                patience=int(early_stopping_patience),
+                min_delta=float(early_cfg.get("min_delta", 0.0)),
+            )
+        )
+
     # -------------------
     # TensorBoard logger
     # -------------------
@@ -181,7 +216,7 @@ def train(
 
 
 def load_finetuned_module(
-    pretrained_model: str,
+    pretrained_model: str | None,
     checkpoint_path: str,
     config: Dict[str, Any],
     map_location: str | torch.device = "cpu",
@@ -191,8 +226,8 @@ def load_finetuned_module(
 
     Parameters
     ----------
-    pretrained_model : str
-        Local pretrained model directory.
+    pretrained_model : str | None
+        Local pretrained model directory. Use None for random-initialized finetuning.
     checkpoint_path : str
         Path to the Lightning checkpoint file (.ckpt).
     map_location : str | torch.device, default="cpu"
@@ -205,7 +240,10 @@ def load_finetuned_module(
     """
     
     Model, _, ModelForFinetuning = load_model_package(config.get("model_family", "model_timesbert"))
-    pretrained_backbone = Model.from_pretrained(pretrained_model).model
+    if pretrained_model is None:
+        pretrained_backbone = None
+    else:
+        pretrained_backbone = Model.from_pretrained(pretrained_model).model
 
     # Load Lightning module from checkpoint
     model = ModelForFinetuning.load_from_checkpoint(  # type: ignore[operator]

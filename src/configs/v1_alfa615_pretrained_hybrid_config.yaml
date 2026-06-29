@@ -1,0 +1,84 @@
+seed: 42
+model_family: model_v1
+model_id: v1-alfa615-pretrained-hybrid
+model_version: v1_pretrained_hybrid
+pretrained_model: PretrainedModels/v1-alfa-normal64
+
+data:
+  datamodule: split_csv
+  dataset_name: alfa615
+  root_path: datasets/finetune/alfa/alfa615
+  train: train_labeled.csv
+  val: val_labeled.csv
+  test: test_labeled.csv
+  target_fields:
+    - field.angular_velocity.x
+    - field.angular_velocity.y
+    - field.angular_velocity.z
+    - field.linear_acceleration.x
+    - field.linear_acceleration.y
+    - field.linear_acceleration.z
+    - field.magnetic_field.x
+    - field.magnetic_field.y
+    - field.magnetic_field.z
+    - field.fluid_pressure
+    - field.temperature
+    - field.measured.pitch
+    - field.measured.roll
+    - field.measured.yaw
+    - field.alt_error
+    - field.aspd_error
+    - field.xtrack_error
+    - field.wp_dist
+  label_col: label
+  timestamp_col: time
+  seq_len: 64
+  stride: 1
+  eval_stride: 1
+  batch_size: 256
+  num_workers: 4
+  scaler_type: minmax
+
+model:
+  hidden_size: 128
+  num_layers: 3
+  num_heads: 4
+  ffn_size: 512
+  dropout: 0.1
+  rms_norm_eps: 0.000001
+  rope_theta: 10000.0
+
+optimization:
+  lr: 0.0002
+  weight_decay: 0.01
+
+trainer:
+  max_epochs: 60
+  early_stopping_patience: 8
+  accelerator: auto
+  devices: 1
+  precision: 32-true
+  log_every_n_steps: 20
+  deterministic: true
+  num_sanity_val_steps: 0
+
+evaluation:
+  threshold_percentile: 95
+  score:
+    method: reconstruction_mahalanobis
+    reconstruction_weight: 0.5
+    ridge_multiplier: 0.001
+
+checkpoint:
+  root_dir: checkpoints
+  filename: "{epoch}-{step}-{val_loss:.4f}"
+  monitor: val_loss
+  mode: min
+  save_top_k: 1
+  save_last: true
+
+logging:
+  save_dir: lightning_logs
+
+results:
+  root_dir: results_dir

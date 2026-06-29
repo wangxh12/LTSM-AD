@@ -6,6 +6,8 @@ import lightning as L
 import torch
 from torch.nn import functional as F
 
+from src.data.utils import Timeseries
+
 from .timesbert import Model
 from .backbone import random_patch_mask
 
@@ -42,8 +44,8 @@ class ModelForFinetuning(L.LightningModule):
         return F.mse_loss(prediction, target)
 
 
-    def _shared_step(self, batch: dict[str, torch.Tensor], stage: str) -> torch.Tensor:
-        x = batch["x"]
+    def _shared_step(self, batch: Timeseries, stage: str) -> torch.Tensor:
+        x = batch.series
         prediction = self(x)
         loss = self._point_loss(prediction, x)
         self.log(
@@ -56,10 +58,10 @@ class ModelForFinetuning(L.LightningModule):
         )
         return loss
 
-    def training_step(self, batch: dict[str, torch.Tensor], _batch_idx: int) -> torch.Tensor:
+    def training_step(self, batch: Timeseries, _batch_idx: int) -> torch.Tensor:
         return self._shared_step(batch, "train")
 
-    def validation_step(self, batch: dict[str, torch.Tensor], _batch_idx: int) -> torch.Tensor:
+    def validation_step(self, batch: Timeseries, _batch_idx: int) -> torch.Tensor:
         return self._shared_step(batch, "val")
 
 
@@ -90,8 +92,8 @@ class ModelForPreTraining(L.LightningModule):
         patch_error = error.mean(dim=-1)
         return patch_error[patch_mask].mean()
 
-    def _shared_step(self, batch: dict[str, torch.Tensor], stage: str) -> torch.Tensor:
-        x = batch["x"]
+    def _shared_step(self, batch: Timeseries, stage: str) -> torch.Tensor:
+        x = batch.series
         patch_mask = random_patch_mask(
             batch_size=x.shape[0],
             num_features=self.model.num_features,
@@ -120,10 +122,10 @@ class ModelForPreTraining(L.LightningModule):
         )
         return loss
     
-    def training_step(self, batch: dict[str, torch.Tensor], _batch_idx: int) -> torch.Tensor:
+    def training_step(self, batch: Timeseries, _batch_idx: int) -> torch.Tensor:
         return self._shared_step(batch, "train")
     
-    def validation_step(self, batch: dict[str, torch.Tensor], _batch_idx: int) -> torch.Tensor:
+    def validation_step(self, batch: Timeseries, _batch_idx: int) -> torch.Tensor:
         return self._shared_step(batch, "val")
     
     def configure_optimizers(self) -> torch.optim.Optimizer:

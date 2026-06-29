@@ -7,6 +7,8 @@ import lightning as L
 import torch
 from torch.optim import AdamW
 
+from src.data.utils import Timeseries
+
 from .backbone import ITransformerReconstructionModel
 
 Objective = Literal["pretrain", "finetune"]
@@ -69,13 +71,11 @@ class _ITransformerLightningModule(L.LightningModule):
     ) -> torch.Tensor:
         return self.model(values, valid_mask=valid_mask, point_mask=point_mask)
 
-    def _shared_step(self, batch: dict[str, torch.Tensor], stage: str) -> torch.Tensor:
-        values = batch["values"] if "values" in batch else batch["x"]
-        valid_mask = batch.get("valid_mask")
-        if valid_mask is None:
-            valid_mask = torch.ones(values.shape[:2], dtype=torch.bool, device=values.device)
+    def _shared_step(self, batch: Timeseries, stage: str) -> torch.Tensor:
+        values = batch.series
+        valid_mask = torch.ones(values.shape[:2], dtype=torch.bool, device=values.device)
 
-        point_mask = batch.get("point_mask")
+        point_mask = None
         if self.objective == "pretrain" and point_mask is None:
             point_mask = _random_point_mask(valid_mask, self.mask_ratio)
         if self.objective == "finetune":
@@ -93,10 +93,10 @@ class _ITransformerLightningModule(L.LightningModule):
         )
         return loss
 
-    def training_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
+    def training_step(self, batch: Timeseries, batch_idx: int) -> torch.Tensor:
         return self._shared_step(batch, "train")
 
-    def validation_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
+    def validation_step(self, batch: Timeseries, batch_idx: int) -> torch.Tensor:
         return self._shared_step(batch, "val")
 
     def configure_optimizers(self) -> AdamW:

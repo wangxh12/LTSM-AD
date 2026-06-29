@@ -33,10 +33,10 @@ point_mask: [batch, seq_len] | None
 reconstruction: [batch, seq_len, feature_count]
 ```
 
-当前 `WindowDataset` 返回 `batch["x"]`，`ReconstructionLightningModule` 会兼容读取：
+当前 `WindowDataset` 返回 `Timeseries`，模型通过 `batch.series` 读取窗口：
 
 ```python
-values = batch["values"] if "values" in batch else batch["x"]
+values = batch.series
 ```
 
 所以现有 DataModule 不需要为了 `model_v1` 改 batch 字段。

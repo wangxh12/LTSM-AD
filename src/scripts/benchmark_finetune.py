@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import cast
-
+from src.evaluation.tslib_eval import tslib_eval
 from src.evaluation.evaluate import evaluate_model
 from src.scripts import finetune
 
@@ -44,10 +43,17 @@ def main() -> None:
     
     data_cfg = config["data"]
     dataset_name = str(data_cfg["dataset_name"])
-    pretrained_model = cast(str, config["pretrained_model"])
-    base_model_name = Path(pretrained_model).name # eg. timesbert-base
+    pretrained_model = config.get("pretrained_model")
+    if pretrained_model is not None and not isinstance(pretrained_model, str):
+        raise TypeError(f"pretrained_model must be a string path or null, got {pretrained_model!r}")
+    base_model_name = (
+        Path(pretrained_model).name
+        if pretrained_model is not None
+        else str(config.get("model_id", config.get("model_family", "model")))
+    )
+    run_name = str(config.get("run_name", base_model_name))
     mode_name = "finetuning" if args.is_finetuning else "zero_shot"
-    model_name = f"{base_model_name}_{mode_name}"
+    model_name = f"{run_name}_{mode_name}"
 
     # result path
     results_root = Path(config.get("results", {}).get("root_dir"))
@@ -102,6 +108,8 @@ def main() -> None:
         config,
         output_dir=result_dir
     )
+    
+    tslib_eval(trained_model, datamodule, config, result_dir)
 
     threshold_percentile = float(config["evaluation"].get("threshold_percentile", 95))
     summary = {

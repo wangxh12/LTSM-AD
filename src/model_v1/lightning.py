@@ -7,6 +7,8 @@ import lightning as L
 import torch
 from torch.optim import AdamW
 
+from src.data.utils import Timeseries
+
 from .backbone import ReconstructionModel
 
 Objective = Literal["pretrain", "finetune"]
@@ -65,12 +67,10 @@ class ReconstructionLightningModule(L.LightningModule):
             valid_mask = torch.ones(values.shape[:2], dtype=torch.bool, device=values.device)
         return self.model(values, valid_mask, point_mask)
 
-    def _shared_step(self, batch: dict[str, torch.Tensor], stage: str) -> torch.Tensor:
-        values = batch["values"] if "values" in batch else batch["x"]
-        valid_mask = batch.get("valid_mask")
-        if valid_mask is None:
-            valid_mask = torch.ones(values.shape[:2], dtype=torch.bool, device=values.device)
-        point_mask = batch.get("point_mask") if self.objective == "pretrain" else None
+    def _shared_step(self, batch: Timeseries, stage: str) -> torch.Tensor:
+        values = batch.series
+        valid_mask = torch.ones(values.shape[:2], dtype=torch.bool, device=values.device)
+        point_mask = None
         reconstruction = self(values, valid_mask, point_mask)
         loss = reconstruction_mse(reconstruction, values, valid_mask, point_mask)
         self.log(
@@ -83,10 +83,10 @@ class ReconstructionLightningModule(L.LightningModule):
         )
         return loss
 
-    def training_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
+    def training_step(self, batch: Timeseries, batch_idx: int) -> torch.Tensor:
         return self._shared_step(batch, "train")
 
-    def validation_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
+    def validation_step(self, batch: Timeseries, batch_idx: int) -> torch.Tensor:
         return self._shared_step(batch, "val")
 
     def configure_optimizers(self) -> AdamW:
@@ -144,12 +144,10 @@ class _BenchmarkReconstructionModule(L.LightningModule):
             valid_mask = torch.ones(values.shape[:2], dtype=torch.bool, device=values.device)
         return self.model(values, valid_mask, point_mask)
 
-    def _shared_step(self, batch: dict[str, torch.Tensor], stage: str) -> torch.Tensor:
-        values = batch["values"] if "values" in batch else batch["x"]
-        valid_mask = batch.get("valid_mask")
-        if valid_mask is None:
-            valid_mask = torch.ones(values.shape[:2], dtype=torch.bool, device=values.device)
-        point_mask = batch.get("point_mask")
+    def _shared_step(self, batch: Timeseries, stage: str) -> torch.Tensor:
+        values = batch.series
+        valid_mask = torch.ones(values.shape[:2], dtype=torch.bool, device=values.device)
+        point_mask = None
         if self.objective == "pretrain" and point_mask is None:
             point_mask = _random_point_mask(valid_mask, self.mask_ratio)
         if self.objective == "finetune":
@@ -167,10 +165,10 @@ class _BenchmarkReconstructionModule(L.LightningModule):
         )
         return loss
 
-    def training_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
+    def training_step(self, batch: Timeseries, batch_idx: int) -> torch.Tensor:
         return self._shared_step(batch, "train")
 
-    def validation_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
+    def validation_step(self, batch: Timeseries, batch_idx: int) -> torch.Tensor:
         return self._shared_step(batch, "val")
 
     def configure_optimizers(self) -> AdamW:
@@ -183,7 +181,12 @@ class ModelForPreTraining(_BenchmarkReconstructionModule):
 
 
 class ModelForFinetuning(_BenchmarkReconstructionModule):
-    def __init__(self, pretrained_backbone: ReconstructionModel, config: Mapping[str, Any]) -> None:
+    def __init__(self, pretrained_backbone: ReconstructionModel | None, config: Mapping[str, Any]) -> None:
+        if pretrained_backbone is None:
+            pretrained_backbone = ReconstructionModel(
+                feature_count=len(_feature_columns(config)),
+                **dict(config["model"]),
+            )
         super().__init__(backbone=pretrained_backbone, config=config, objective="finetune")
 
 

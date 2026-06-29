@@ -83,7 +83,7 @@ class ModelForFinetuning(L.LightningModule):
 
 - `backbone` 是 `Model(config).model`。
 - `pretrained_backbone` 是 `Model.from_pretrained(path).model`。
-- 两个 LightningModule 都应接收 batch 中的 `batch["x"]`。
+- 两个 LightningModule 都应通过 `batch.series` 接收窗口数据。
 - `forward(x)` 应返回与 `x` 同形状的 reconstruction。
 
 ## 动态加载

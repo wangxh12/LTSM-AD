@@ -6,7 +6,7 @@ from typing import Any, Mapping, Sequence
 import lightning as L
 from torch.utils.data import DataLoader, Dataset
 
-from .csv_windows import CsvSeries, StandardScaler, WindowDataset, read_csv_series
+from .csv_windows import CsvSeries, Scaler, FlightDataset, fit_scaler, read_csv_series, scaler_to_dict
 
 
 class SplitCsvFinetuneDataModule(L.LightningDataModule):
@@ -21,7 +21,7 @@ class SplitCsvFinetuneDataModule(L.LightningDataModule):
         self,
         root_path: str | Path,
         train_file: str | Path,
-        test_file: str | Path,
+        test_file: str | Path | list[str | Path],
         feature_names: Sequence[str],
         seq_len: int,
         val_file: str | Path | None = None,
@@ -37,7 +37,15 @@ class SplitCsvFinetuneDataModule(L.LightningDataModule):
         self.root_path = Path(root_path)
         self.train_file = self._normalize_file_key(train_file)
         self.val_file = self._normalize_file_key(val_file) if val_file is not None else None
-        self.test_file = self._normalize_file_key(test_file)
+        if isinstance(test_file, (str, Path)):
+            self.test_files = [self._normalize_file_key(test_file)]
+        elif isinstance(test_file, list):
+            if not test_file:
+                raise ValueError("data.test must contain at least one file")
+            self.test_files = [self._normalize_file_key(path) for path in test_file]
+        else:
+            raise TypeError(f"data.test must be a file name or list of file names, got {test_file!r}")
+        self.test_file = self.test_files[0]
         self.feature_names = list(feature_names)
         self.seq_len = int(seq_len)
         self.stride = int(stride)
@@ -50,24 +58,23 @@ class SplitCsvFinetuneDataModule(L.LightningDataModule):
 
         self.train_files = [self.train_file]
         self.val_files = [self.val_file] if self.val_file is not None else []
-        self.test_files = [self.test_file]
-        self.test_paths = [self.root_path / self.test_file]
+        self.test_paths = [self.root_path / path for path in self.test_files]
 
-        self.scaler: StandardScaler | None = None
+        self.scaler: Scaler | None = None
         self.train_series: CsvSeries | None = None
         self.val_series: CsvSeries | None = None
-        self.test_series: CsvSeries | None = None
-        self.train_dataset: WindowDataset | None = None
-        self.val_dataset: WindowDataset | None = None
-        self.threshold_dataset: WindowDataset | None = None
-        self._test_dataset: WindowDataset | None = None
+        self.test_series: dict[str, CsvSeries] = {}
+        self.train_dataset: FlightDataset | None = None
+        self.val_dataset: FlightDataset | None = None
+        self.threshold_dataset: FlightDataset | None = None
+        self._test_datasets: dict[str, FlightDataset] = {}
 
     @classmethod
     def from_config(cls, config: Mapping[str, Any]) -> "SplitCsvFinetuneDataModule":
         data_cfg = config["data"]
         train_file = cls._require_single_file(data_cfg, "train")
         val_file = cls._optional_single_file(data_cfg, "val")
-        test_file = cls._require_single_file(data_cfg, "test")
+        test_file = cls._require_file_or_file_list(data_cfg, "test")
         return cls(
             root_path=data_cfg["root_path"],
             train_file=train_file,
@@ -90,17 +97,17 @@ class SplitCsvFinetuneDataModule(L.LightningDataModule):
 
         self.train_series = self._load_series(self.train_file)
         self._validate_segment_length(self.train_file, "train", len(self.train_series.values))
-        self.scaler = StandardScaler.fit(self.train_series.values, self.scaler_type)
+        self.scaler = fit_scaler(self.train_series.values, self.scaler_type)
 
         train_values = self.scaler.transform(self.train_series.values)
-        self.train_dataset = WindowDataset(
+        self.train_dataset = FlightDataset(
             train_values,
             seq_len=self.seq_len,
             stride=self.stride,
             labels=self.train_series.labels,
             drop_anomaly_windows=True,
         )
-        self.threshold_dataset = WindowDataset(
+        self.threshold_dataset = FlightDataset(
             train_values,
             seq_len=self.seq_len,
             stride=self.eval_stride,
@@ -112,13 +119,14 @@ class SplitCsvFinetuneDataModule(L.LightningDataModule):
             self.val_series = self._load_series(self.val_file)
             self._validate_segment_length(self.val_file, "val", len(self.val_series.values))
             self.val_series.values = self.scaler.transform(self.val_series.values)
-            self.val_dataset = WindowDataset(
+            self.val_dataset = FlightDataset(
                 self.val_series.values,
                 seq_len=self.seq_len,
                 stride=self.eval_stride,
                 labels=self.val_series.labels,
                 drop_anomaly_windows=True,
             )
+            self.threshold_dataset = self.val_dataset
 
     def train_dataloader(self) -> DataLoader:
         return self._loader(self.train_dataset, shuffle=True)
@@ -135,46 +143,49 @@ class SplitCsvFinetuneDataModule(L.LightningDataModule):
 
     def test_dataloader(self) -> list[DataLoader]:
         self._require_setup()
-        return [self.test_dataloader_for(self.test_file)]
+        return [self.test_dataloader_for(path) for path in self.test_files]
 
     def test_dataloader_for(self, path: str | Path) -> DataLoader:
         return self._loader(self.make_test_dataset(path), shuffle=False)
 
-    def make_test_dataset(self, path: str | Path) -> WindowDataset:
+    def make_test_dataset(self, path: str | Path) -> FlightDataset:
         key = self._normalize_file_key(path)
-        if key != self.test_file:
-            raise ValueError(f"{key!r} is not configured as data.test")
-        if self._test_dataset is None:
+        if key not in self.test_files:
+            raise ValueError(f"{key!r} is not configured in data.test")
+        dataset = self._test_datasets.get(key)
+        if dataset is None:
             series = self.make_test_series(key)
-            self._test_dataset = WindowDataset(
+            dataset = FlightDataset(
                 series.values,
                 seq_len=self.seq_len,
                 stride=self.eval_stride,
                 labels=series.labels,
                 drop_anomaly_windows=False,
             )
-        return self._test_dataset
+            self._test_datasets[key] = dataset
+        return dataset
 
     def make_test_series(self, path: str | Path) -> CsvSeries:
         self._require_setup()
         key = self._normalize_file_key(path)
-        if key != self.test_file:
-            raise ValueError(f"{key!r} is not configured as data.test")
-        if self.test_series is None:
-            test_series = self._load_series(key)
-            self._validate_segment_length(key, "test", len(test_series.values))
-            test_series.values = self._require_scaler().transform(test_series.values)
-            self.test_series = test_series
-        return self.test_series
+        if key not in self.test_files:
+            raise ValueError(f"{key!r} is not configured in data.test")
+        series = self.test_series.get(key)
+        if series is None:
+            series = self._load_series(key)
+            self._validate_segment_length(key, "test", len(series.values))
+            series.values = self._require_scaler().transform(series.values)
+            self.test_series[key] = series
+        return series
 
-    def scaler_for(self, path: str | Path, section: str = "test") -> StandardScaler:
+    def scaler_for(self, path: str | Path, section: str = "test") -> Scaler:
         self._require_setup()
         key = self._normalize_file_key(path)
         if section == "train" and key != self.train_file:
             raise ValueError(f"{key!r} is not configured as data.train")
         if section == "val" and key != self.val_file:
             raise ValueError(f"{key!r} is not configured as data.val")
-        if section == "test" and key != self.test_file:
+        if section == "test" and key not in self.test_files:
             raise ValueError(f"{key!r} is not configured as data.test")
         if section not in {"train", "val", "test"}:
             raise ValueError("section must be one of 'train', 'val', or 'test'")
@@ -182,11 +193,11 @@ class SplitCsvFinetuneDataModule(L.LightningDataModule):
 
     def scalers_to_dict(self) -> dict[str, dict[str, dict[str, Any]]]:
         self._require_setup()
-        scaler_state = self._require_scaler().to_dict()
+        scaler_state = scaler_to_dict(self._require_scaler(), self.scaler_type)
         states = {
             "train": {self.train_file: scaler_state},
             "val": {},
-            "test": {self.test_file: scaler_state},
+            "test": {path: scaler_state for path in self.test_files},
         }
         if self.val_file is not None:
             states["val"][self.val_file] = scaler_state
@@ -200,6 +211,25 @@ class SplitCsvFinetuneDataModule(L.LightningDataModule):
         if isinstance(value, (str, Path)):
             return value
         raise TypeError(f"data.{field_name} must be a single file name, got {value!r}")
+
+    @staticmethod
+    def _require_file_or_file_list(
+        data_cfg: Mapping[str, Any],
+        field_name: str,
+    ) -> str | Path | list[str | Path]:
+        if field_name not in data_cfg:
+            raise KeyError(f"Expected data.{field_name} in split-csv finetune config")
+        value = data_cfg[field_name]
+        if isinstance(value, (str, Path)):
+            return value
+        if isinstance(value, list):
+            if not value:
+                raise ValueError(f"data.{field_name} must contain at least one file")
+            bad = [item for item in value if not isinstance(item, (str, Path))]
+            if bad:
+                raise TypeError(f"data.{field_name} entries must be file names, got {bad!r}")
+            return value
+        raise TypeError(f"data.{field_name} must be a file name or list of file names, got {value!r}")
 
     @staticmethod
     def _optional_single_file(data_cfg: Mapping[str, Any], field_name: str) -> str | Path | None:
@@ -255,7 +285,7 @@ class SplitCsvFinetuneDataModule(L.LightningDataModule):
         if self.train_dataset is None:
             raise RuntimeError("DataModule.setup() must be called before requesting datasets")
 
-    def _require_scaler(self) -> StandardScaler:
+    def _require_scaler(self) -> Scaler:
         if self.scaler is None:
             raise RuntimeError("DataModule.setup() must be called before requesting the scaler")
         return self.scaler

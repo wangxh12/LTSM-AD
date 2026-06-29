@@ -11,7 +11,7 @@ import numpy as np
 import yaml
 from torch.utils.data import ConcatDataset, DataLoader, Dataset
 
-from .csv_windows import CsvSeries, StandardScaler, WindowDataset, read_csv_series
+from .csv_windows import CsvSeries, Scaler, FlightDataset, fit_scaler, read_csv_series, scaler_to_dict
 
 
 @dataclass(frozen=True)
@@ -122,9 +122,9 @@ class FinetuneDataModule(L.LightningDataModule):
         self.test_files: list[str] = []
         self.test_paths: list[Path] = []
 
-        self.train_scalers: dict[str, StandardScaler] = {}
-        self.test_scalers: dict[str, StandardScaler] = {}
-        self.scaler: StandardScaler | None = None
+        self.train_scalers: dict[str, Scaler] = {}
+        self.test_scalers: dict[str, Scaler] = {}
+        self.scaler: Scaler | None = None
 
         self.train_dataset: ConcatDataset | None = None
         self.val_dataset: ConcatDataset | None = None
@@ -164,8 +164,8 @@ class FinetuneDataModule(L.LightningDataModule):
         self.test_files = self._select_files("test", self.test_files_arg, field_name="test")
         self.test_paths = [self.root_path / path for path in self.test_files]
 
-        train_datasets: list[WindowDataset] = []
-        val_datasets: list[WindowDataset] = []
+        train_datasets: list[FlightDataset] = []
+        val_datasets: list[FlightDataset] = []
         for path in self.train_files:
             train_datasets.append(self._make_train_dataset(path))
         for path in self.val_files:
@@ -201,7 +201,7 @@ class FinetuneDataModule(L.LightningDataModule):
     def test_dataloader_for(self, path: str | Path) -> DataLoader:
         return self._loader(self.make_test_dataset(path), shuffle=False)
 
-    def make_test_dataset(self, path: str | Path) -> WindowDataset:
+    def make_test_dataset(self, path: str | Path) -> FlightDataset:
         series = self.make_test_series(path)
         return self._window_dataset(
             path=self._normalize_file_key(path),
@@ -227,7 +227,7 @@ class FinetuneDataModule(L.LightningDataModule):
         series.values = scaler.transform(series.values)
         return series
 
-    def scaler_for(self, path: str | Path, section: str = "test") -> StandardScaler:
+    def scaler_for(self, path: str | Path, section: str = "test") -> Scaler:
         self._require_setup()
         key = self._normalize_file_key(path)
         if section == "train":
@@ -239,8 +239,14 @@ class FinetuneDataModule(L.LightningDataModule):
     def scalers_to_dict(self) -> dict[str, dict[str, dict[str, Any]]]:
         self._require_setup()
         return {
-            "train": {path: scaler.to_dict() for path, scaler in self.train_scalers.items()},
-            "test": {path: scaler.to_dict() for path, scaler in self.test_scalers.items()},
+            "train": {
+                path: scaler_to_dict(scaler, self.scaler_type)
+                for path, scaler in self.train_scalers.items()
+            },
+            "test": {
+                path: scaler_to_dict(scaler, self.scaler_type)
+                for path, scaler in self.test_scalers.items()
+            },
         }
 
     def _load_split_config(self) -> None:
@@ -302,7 +308,7 @@ class FinetuneDataModule(L.LightningDataModule):
             self._series_cache[path] = series
         return series
 
-    def _make_train_dataset(self, path: str) -> WindowDataset:
+    def _make_train_dataset(self, path: str) -> FlightDataset:
         split = self.split_config["train"][path]
         raw_series = self._load_series(path)
         split.validate_length(len(raw_series.values))
@@ -319,7 +325,7 @@ class FinetuneDataModule(L.LightningDataModule):
             allow_empty=False,
         )
 
-    def _make_val_dataset(self, path: str) -> WindowDataset | None:
+    def _make_val_dataset(self, path: str) -> FlightDataset | None:
         split = self.split_config["train"][path]
         raw_series = self._load_series(path)
         split.validate_length(len(raw_series.values))
@@ -336,7 +342,7 @@ class FinetuneDataModule(L.LightningDataModule):
             allow_empty=True,
         )
 
-    def _train_scaler_for(self, path: str) -> StandardScaler:
+    def _train_scaler_for(self, path: str) -> Scaler:
         scaler = self.train_scalers.get(path)
         if scaler is not None:
             return scaler
@@ -345,11 +351,11 @@ class FinetuneDataModule(L.LightningDataModule):
         split.validate_length(len(raw_series.values))
         values = raw_series.values[split.train_slice]
         self._validate_segment_length(path, "train scaler", len(values), allow_empty=False)
-        scaler = StandardScaler.fit(values, self.scaler_type)
+        scaler = fit_scaler(values, self.scaler_type)
         self.train_scalers[path] = scaler
         return scaler
 
-    def _test_scaler_for(self, path: str) -> StandardScaler:
+    def _test_scaler_for(self, path: str) -> Scaler:
         scaler = self.test_scalers.get(path)
         if scaler is not None:
             return scaler
@@ -358,7 +364,7 @@ class FinetuneDataModule(L.LightningDataModule):
         split.validate_length(len(raw_series.values))
         values = raw_series.values[split.train_slice]
         self._validate_segment_length(path, "test scaler", len(values), allow_empty=False)
-        scaler = StandardScaler.fit(values, self.scaler_type)
+        scaler = fit_scaler(values, self.scaler_type)
         self.test_scalers[path] = scaler
         return scaler
 
@@ -371,11 +377,11 @@ class FinetuneDataModule(L.LightningDataModule):
         stride: int,
         drop_anomaly_windows: bool,
         allow_empty: bool,
-    ) -> WindowDataset | None:
+    ) -> FlightDataset | None:
         self._validate_segment_length(path, split_name, len(values), allow_empty=allow_empty)
         if len(values) == 0:
             return None
-        return WindowDataset(
+        return FlightDataset(
             values,
             seq_len=self.seq_len,
             stride=stride,

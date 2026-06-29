@@ -1,0 +1,81 @@
+seed: 42
+model_family: model_v1
+model_id: v1-minnesota-scratch
+pretrained_model: PretrainedModels/v1-minnesota-base
+
+data:
+  datamodule: flight_split
+  dataset_name: minnesota618
+  root_path: datasets/finetune/minnesota/minnesota618
+
+  train:
+    - train_flight104.csv
+  val:
+    - train_flight104.csv
+  test:
+    - ThorFlight112.csv
+    - ThorFlight121.csv
+    - ThorFlight111.csv
+
+  target_fields:
+    - navalt
+    - alt
+    - h
+    - navvn
+    - navve
+    - navvd
+    - vn
+    - ve
+    - vd
+    - p
+    - q
+    - r
+  label_col: label
+  timestamp_col: time
+
+  seq_len: 32
+  stride: 1
+  eval_stride: 1
+  batch_size: 256
+  num_workers: 4
+  scaler_type: standard
+
+model:
+  hidden_size: 128
+  num_layers: 2
+  num_heads: 4
+  ffn_size: 256
+  dropout: 0.1
+  rms_norm_eps: 0.000001
+  rope_theta: 10000.0
+
+optimization:
+  lr: 0.0001
+  weight_decay: 0.0001
+
+trainer:
+  max_epochs: 20
+  early_stopping_patience: 3
+  accelerator: auto
+  devices: 1
+  precision: 32-true
+  log_every_n_steps: 20
+  deterministic: false
+  num_sanity_val_steps: 0
+
+evaluation:
+  threshold_percentile: 95
+
+checkpoint:
+  root_dir: checkpoints
+  filename: "{epoch}-{step}-{val_loss:.4f}"
+  monitor: val_loss
+  mode: min
+  save_top_k: 1
+  save_last: true
+
+logging:
+  save_dir: lightning_logs
+
+results:
+  root_dir: results_dir
