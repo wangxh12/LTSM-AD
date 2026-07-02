@@ -7,6 +7,7 @@ import lightning as L
 import torch
 from torch import nn
 from torch.optim import AdamW
+from torch.optim.lr_scheduler import CosineAnnealingLR
 
 from src.data.utils import Timeseries
 
@@ -123,8 +124,60 @@ class _ModelV3LightningModule(L.LightningModule):
             raise KeyError("Expected data.target_fields or model.input_channels for model_v3")
         return len(target_fields)
 
-    def configure_optimizers(self) -> AdamW:
-        return AdamW(self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
+    def configure_optimizers(self) -> AdamW | dict[str, Any]:
+        trainable_parameters = [parameter for parameter in self.parameters() if parameter.requires_grad]
+        if not trainable_parameters:
+            raise RuntimeError("model_v3 has no trainable parameters")
+
+        optimization = self.config["optimization"]
+        betas_value = optimization.get("betas", (0.9, 0.999))
+        if not isinstance(betas_value, (list, tuple)) or len(betas_value) != 2:
+            raise ValueError("optimization.betas must contain exactly two values")
+        betas = (float(betas_value[0]), float(betas_value[1]))
+        optimizer = AdamW(
+            trainable_parameters,
+            lr=self.learning_rate,
+            betas=betas,
+            weight_decay=self.weight_decay,
+        )
+
+        scheduler_config = optimization.get("scheduler")
+        if scheduler_config is None:
+            return optimizer
+        if not isinstance(scheduler_config, Mapping):
+            raise TypeError("optimization.scheduler must be a mapping")
+        scheduler_type = str(scheduler_config.get("type", ""))
+        if scheduler_type != "cosine_annealing":
+            raise ValueError(
+                "model_v3 only supports optimization.scheduler.type='cosine_annealing', "
+                f"got {scheduler_type!r}"
+            )
+        if "t_max_steps" not in scheduler_config:
+            raise KeyError("Expected optimization.scheduler.t_max_steps for cosine annealing")
+        if "eta_min" not in scheduler_config:
+            raise KeyError("Expected optimization.scheduler.eta_min for cosine annealing")
+
+        t_max_steps = int(scheduler_config["t_max_steps"])
+        eta_min = float(scheduler_config["eta_min"])
+        if t_max_steps <= 0:
+            raise ValueError("optimization.scheduler.t_max_steps must be positive")
+        if not 0.0 <= eta_min < self.learning_rate:
+            raise ValueError("optimization.scheduler.eta_min must satisfy 0 <= eta_min < optimization.lr")
+
+        scheduler = CosineAnnealingLR(
+            optimizer,
+            T_max=t_max_steps,
+            eta_min=eta_min,
+        )
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "step",
+                "frequency": 1,
+                "name": "learning_rate",
+            },
+        }
 
     def _prepare_values(self, values: torch.Tensor, valid_mask: torch.Tensor) -> torch.Tensor:
         return values * valid_mask.unsqueeze(-1).to(dtype=values.dtype)
@@ -247,6 +300,42 @@ class ModelForFinetuning(_ModelV3LightningModule):
     def __init__(self, pretrained_backbone: nn.Module | None, config: Mapping[str, Any]) -> None:
         backbone = pretrained_backbone if pretrained_backbone is not None else Model(dict(config)).model
         super().__init__(backbone=backbone, config=config, objective="finetune")
+        self._configure_trainable_parameters(config)
+
+    def train(self, mode: bool = True) -> "ModelForFinetuning":
+        super().train(mode)
+        if self.finetune_scope == "reconstruction_head":
+            self.model.eval()
+            self.model.reconstruction_head.train(mode)
+        return self
+
+    def _configure_trainable_parameters(self, config: Mapping[str, Any]) -> None:
+        optimization = config.get("optimization")
+        if not isinstance(optimization, Mapping):
+            raise TypeError("Expected optimization mapping in model_v3 finetuning config")
+        if "finetune_scope" not in optimization:
+            raise KeyError(
+                "Expected optimization.finetune_scope in model_v3 finetuning config; "
+                "use 'reconstruction_head' or 'all'"
+            )
+
+        self.finetune_scope = str(optimization["finetune_scope"])
+        if self.finetune_scope == "all":
+            for parameter in self.model.parameters():
+                parameter.requires_grad = True
+            return
+        if self.finetune_scope != "reconstruction_head":
+            raise ValueError(
+                "optimization.finetune_scope must be either 'reconstruction_head' or 'all', "
+                f"got {self.finetune_scope!r}"
+            )
+        if not hasattr(self.model, "reconstruction_head"):
+            raise AttributeError("model_v3 backbone must expose reconstruction_head for head-only finetuning")
+
+        for parameter in self.model.parameters():
+            parameter.requires_grad = False
+        for parameter in self.model.reconstruction_head.parameters():
+            parameter.requires_grad = True
 
 
 __all__ = [

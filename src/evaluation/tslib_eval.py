@@ -57,13 +57,13 @@ def _binary_metrics(gt: np.ndarray, pred: np.ndarray, threshold: float) -> dict[
 
 def tslib_eval(model: L.LightningModule, data, config, output_dir: str | Path):
     
-    setting = 'anomaly_detection_{}'.format(config.model_id)
+    setting = 'anomaly_detection_{}'.format(config.get("model_id"))
     
-    tslib_cfg = config.get("evaluation", {}).get("tslib", {})
+    evaluation = config.get("evaluation", {})
     
-    anomaly_ratio = float(tslib_cfg["anomaly_ratio"])
-    score_mode = str(tslib_cfg.get("score_mode", "mae"))
-    anomaly_criterion = nn.MSELoss(reduce=False)
+    anomaly_ratio = float(evaluation["anomaly_ratio"])
+    # score_mode = str(evaluation.get("score_mode", "mae"))
+    anomaly_criterion = nn.MSELoss(reduction='none')
     
     device = model.device
     model.to(device)
@@ -76,11 +76,13 @@ def tslib_eval(model: L.LightningModule, data, config, output_dir: str | Path):
     
     threshold_dataset = getattr(data, "train_dataset", None)
     train_loader= _make_loader(threshold_dataset, batch_size, num_workers)
+    
+    attens_energy = []
 
     # (1) stastic on the train set
     with torch.no_grad():
-        for i, (batch_x, batch_y) in enumerate(train_loader):
-            batch_x = batch_x.float().to(device)
+        for i, batch in enumerate(train_loader):
+            batch_x = batch.series.float().to(device)
             # reconstruction
             outputs = model(batch_x)
             # criterion
@@ -103,15 +105,16 @@ def tslib_eval(model: L.LightningModule, data, config, output_dir: str | Path):
         
         attens_energy = []
         test_labels = []
-        for i, batch in enumerate(test_loader):
-            batch_x = batch.series.float().to(device)
-            # reconstruction
-            outputs = model(batch_x)
-            # criterion
-            score = torch.mean(anomaly_criterion(batch_x, outputs), dim=-1)
-            score = score.detach().cpu().numpy()
-            attens_energy.append(score)
-            test_labels.append(batch.label)
+        with torch.no_grad():
+            for i, batch in enumerate(test_loader):
+                batch_x = batch.series.float().to(device)
+                # reconstruction
+                outputs = model(batch_x)
+                # criterion
+                score = torch.mean(anomaly_criterion(batch_x, outputs), dim=-1)
+                score = score.detach().cpu().numpy()
+                attens_energy.append(score)
+                test_labels.append(batch.label)
 
         attens_energy = np.concatenate(attens_energy, axis=0).reshape(-1)
         test_energy = np.array(attens_energy)
@@ -144,7 +147,8 @@ def tslib_eval(model: L.LightningModule, data, config, output_dir: str | Path):
 
 
         f = open(output_dir / "result_anomaly_detection.txt", 'a')
-        setting += dataset_name + test_path
+        setting += dataset_name
+        setting += str(test_path)
         f.write(setting + "  \n")
         f.write("Accuracy : {:0.4f}, Precision : {:0.4f}, Recall : {:0.4f}, F-score : {:0.4f} ".format(
             accuracy, precision,
@@ -152,6 +156,5 @@ def tslib_eval(model: L.LightningModule, data, config, output_dir: str | Path):
         f.write('\n')
         f.write('\n')
         f.close()
-        return
     
     

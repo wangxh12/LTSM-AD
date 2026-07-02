@@ -12,6 +12,7 @@ from lightning.pytorch.callbacks import Callback, EarlyStopping, ModelCheckpoint
 from lightning.pytorch.loggers import TensorBoardLogger
 
 from src.data.csv_windows import FinetuneDataModule as CsvWindowsFinetuneDataModule
+from src.data.datamodule import GlobalCsvFinetuneDataModule
 from src.data.finetune_datamodule import FinetuneDataModule as FlightSplitFinetuneDataModule
 from src.data.split_csv_finetune_datamodule import SplitCsvFinetuneDataModule
 from src.scripts.utils import load_model_package, save_json
@@ -60,12 +61,14 @@ def get_datamodule(
         "csv_windows": CsvWindowsFinetuneDataModule,
         "flight_split": FlightSplitFinetuneDataModule, # 按config.yaml划分
         "split_csv": SplitCsvFinetuneDataModule, # train和val都是一个csv, test可以是多个， 用train来归一化val和test
+        "global_csv": GlobalCsvFinetuneDataModule,
     }
     try:
         datamodule_class = datamodule_classes[datamodule_name]
     except KeyError as exc:
         raise ValueError(
-            "data.datamodule must be one of '', 'csv_windows', 'flight_split', or 'split_csv'; "
+            "data.datamodule must be one of 'csv_windows', 'flight_split', 'split_csv', "
+            "or 'global_csv'; "
             f"got {datamodule_name!r}"
         ) from exc
 

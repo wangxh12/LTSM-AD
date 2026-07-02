@@ -1,16 +1,8 @@
-import math
-from typing import Optional, Tuple, List, Union
-import warnings
-
 import torch
 from torch import nn
-import torch.nn.functional as F
-from transformers import PreTrainedModel, Cache, DynamicCache, StaticCache
+# import torch.nn.functional as F
+# from transformers import PreTrainedModel, Cache, DynamicCache, StaticCache
 from transformers.activations import ACT2FN
-from transformers.modeling_attn_mask_utils import _prepare_4d_causal_attention_mask
-from transformers.modeling_outputs import MoeModelOutputWithPast, MoeCausalLMOutputWithPast
-from transformers.utils import logging, is_flash_attn_2_available, is_flash_attn_greater_or_equal_2_10
-
 
 
 class TimeMoeInputEmbedding(nn.Module):

@@ -4,7 +4,7 @@ run
 
 pretrain
 ```bash
-ssh root@h100 "cd /workspace/code/LTSM-AD && conda run -n ltsm python -m src.scripts.benchmark_pretrain --config <config_patch>"
+ssh root@h100 "cd /workspace/code/LTSM-AD &&  CUDA_VISIBLE_DEVICES=0,1,4 conda run -n ltsm python -m src.scripts.benchmark_pretrain --config <config_patch>"
 
 # eg
 ssh root@h100 "cd /workspace/code/LTSM-AD && conda run -n ltsm python -m src.scripts.benchmark_pretrain"

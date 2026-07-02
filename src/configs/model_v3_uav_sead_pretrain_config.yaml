@@ -1,34 +1,36 @@
 seed: 42
 model_family: model_v3
-model_id: model-v3-minnesota-base
+model_id: model-v3-uav-sead-base
 
 data:
-  dataset_name: minnesota_raw_split_thor
-  root_path: datasets/pretrain/minnesota/raw_split
-  pattern: "ThorFlight*.csv"
+  dataset_name: uav_sead_normal_20hz
+  root_path: /workspace/code/datasets/UAV_SEAD/processed_normal/20hz/ulg_files
+  pattern: "*.csv"
 
   target_fields:
-    - navalt
-    - alt
-    - h
-    - navvn
-    - navve
-    - navvd
-    - vn
-    - ve
-    - vd
-    - p
-    - q
-    - r
-  label_col: label
-  timestamp_col: time
+    - imu.gyro_x
+    - imu.gyro_y
+    - imu.gyro_z
+    - imu.accel_x
+    - imu.accel_y
+    - imu.accel_z
+    - magnetic_field.x
+    - magnetic_field.y
+    - magnetic_field.z
+    - baro.pressure_pa
+    - baro.temperature_c
+    - attitude.roll
+    - attitude.pitch
+    - attitude.yaw
+  label_col: null
+  timestamp_col: time_s
 
   seq_len: 40
   stride: 1
   train_val_split: 0.9
-  batch_size: 256
-  num_workers: 4
-  scaler_type: minmax
+  batch_size: 1024
+  num_workers: 0
+  scaler_type: standard # minmax
 
 model:
   patch_size: 4
@@ -37,7 +39,6 @@ model:
   num_heads: 4
   d_ffn: 256
   dropout: 0.1
-  # rope_theta: 10000.0
   causal: false
 
 optimization:

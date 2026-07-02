@@ -89,6 +89,8 @@ def _clean_numeric_frame(frame: pd.DataFrame) -> np.ndarray:
     numeric = numeric.fillna(0.0)
     return numeric.to_numpy(dtype=np.float32)
 
+class UnavailableFeatureError(ValueError):
+      pass
 
 def read_csv_series(
     path: str | Path,
@@ -201,15 +203,48 @@ class PretrainDataModule(L.LightningDataModule):
         if self.train_dataset is not None and self.val_dataset is not None:
             return
 
-        paths = sorted(self.root.rglob(self.pattern))
+        paths = sorted(self.root.rglob(self.pattern)) # sead: 876
         if not paths:
             raise FileNotFoundError(f"No CSV files matched {self.root}/{self.pattern}")
-        self.csv_paths = paths
+        # self.csv_paths = paths
+        self.csv_paths = []
+        skipped_paths: list[Path] = []
 
         train_datasets: list[FlightDataset] = []
         val_datasets: list[FlightDataset] = []
+        feature_set = set(self.feature_names)
         for path in paths:
+            # 组装batch需要同样的shape，这里有缺失字段的都简单去除
+            candidate = pd.read_csv(
+                path,
+                usecols=lambda column: column in feature_set,
+            )
+
+            missing_columns = [
+            field
+            for field in self.feature_names
+            if field not in candidate.columns
+            ]
+
+            unavailable_columns = []
+            if not missing_columns:
+                numeric = candidate.apply(pd.to_numeric, errors="coerce")
+                numeric = numeric.replace([np.inf, -np.inf], np.nan)
+
+                unavailable_columns = [
+                    field
+                    for field in self.feature_names
+                    if not numeric[field].notna().any()
+                ]
+
+            if missing_columns or unavailable_columns:
+                skipped_paths.append(path)
+                continue
+
+            del candidate
+            
             series = read_csv_series(path, self.feature_names, self.label_col, self.time_col)
+            self.csv_paths.append(path)
             split_index = int(len(series.values) * self.split_ratio)
             split_index = max(self.seq_len, min(split_index, len(series.values) - self.seq_len))
             train_values = series.values[:split_index]
@@ -236,6 +271,17 @@ class PretrainDataModule(L.LightningDataModule):
                     drop_anomaly_windows=True,
                 )
             )
+            
+        if not train_datasets:
+            raise RuntimeError(
+                "No usable CSV files remained after feature validation"
+            )
+
+        print(
+            f"Pretraining CSV files: used={len(self.csv_paths)}, "
+            f"skipped={len(skipped_paths)}"
+        )
+        # exit()
 
         self.train_dataset = ConcatDataset(train_datasets)
         self.val_dataset = ConcatDataset(val_datasets)
@@ -244,7 +290,7 @@ class PretrainDataModule(L.LightningDataModule):
         return self._loader(self.train_dataset, shuffle=True)
 
     def val_dataloader(self) -> DataLoader:
-        return self._loader(self.val_dataset, shuffle=True)
+        return self._loader(self.val_dataset, shuffle=False)
 
     def _loader(self, dataset: Dataset | None, shuffle: bool) -> DataLoader:
         if dataset is None:

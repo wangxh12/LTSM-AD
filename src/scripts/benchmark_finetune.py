@@ -35,7 +35,6 @@ def main() -> None:
         help="Path to finetuning/evaluation YAML.",
     )
     parser.add_argument("--is_finetuning", type=_bool_arg, default=True)
-    parser.add_argument("--pretrained_checkpoint", default=None, help="Optional pretraining checkpoint for finetuning init.")
     args = parser.parse_args()
 
     # load config
@@ -109,7 +108,8 @@ def main() -> None:
         output_dir=result_dir
     )
     
-    tslib_eval(trained_model, datamodule, config, result_dir)
+    if "anomaly_ratio" in config["evaluation"]:
+        tslib_eval(trained_model, datamodule, config, result_dir)
 
     threshold_percentile = float(config["evaluation"].get("threshold_percentile", 95))
     summary = {
